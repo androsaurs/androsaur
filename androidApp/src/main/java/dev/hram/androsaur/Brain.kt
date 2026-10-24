@@ -5,6 +5,9 @@ import android.os.SystemClock
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import dev.hram.androsaur.delivery.Delivery
+import dev.hram.androsaur.delivery.DeliveryGate
+import dev.hram.androsaur.delivery.WaitingNote
 import dev.hram.androsaur.face.Reflexes
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -85,6 +88,7 @@ class Brain(context: Context) {
     /** The polling loop; call it from a background coroutine and cancel it when the screen goes away. */
     suspend fun run() = coroutineScope {
         launch { followMouth() }
+        launch { deliverNotes() }
         loop()
     }
 
@@ -97,6 +101,57 @@ class Brain(context: Context) {
             if (speaking) lastActivityAt = SystemClock.elapsedRealtime()
             delay(if (speaking) 60 else 400)
         }
+    }
+
+    private val gate = DeliveryGate()
+
+    /** Roles for people («жена» to the name the camera knows), kept in the preferences as JSON; notes for a role go to that person. */
+    private fun aliases(): Map<String, String> = runCatching {
+        val json = JSONObject(prefs.getString("aliases", "{}") ?: "{}")
+        json.keys().asSequence().associateWith { json.getString(it) }
+    }.getOrDefault(emptyMap())
+
+    /**
+     * Voice notes by face: when a person is recognised and notes wait for them (by name or by role), the audio module plays them,
+     * one after another, each with «Тебе сообщение от …». If the person leaves or somebody else is recognised meanwhile, the note
+     * is cut short and stays waiting (the audio module marks a note heard only when it played to the end).
+     */
+    private suspend fun deliverNotes() {
+        var lastName = ""
+        while (true) {
+            delay(500)
+            val now = SystemClock.elapsedRealtime()
+            val name = badge.takeIf { it.isNotEmpty() && it != UNKNOWN && Reflexes.badgeVisible(now, recognizedAt, lastFaceAt) }
+            if (name == null) { if (lastName.isNotEmpty() && !Reflexes.present(now, lastFaceAt)) { gate.left(lastName); lastName = "" }; continue }
+            lastName = name
+            if (!audio.running || speaking || !gate.shouldCheck(name, now)) continue
+            val list = audioClient.get("/notes?pending=1")?.second?.optJSONArray("notes") ?: continue
+            val waiting = List(list.length()) { list.getJSONObject(it).let { n -> WaitingNote(n.getString("id"), n.getString("to"), n.getLong("createdAtMs")) } }
+            val mine = Delivery.forPerson(waiting, name, aliases())
+            if (mine.isEmpty()) { gate.checkedEmpty(name, now); continue }
+            var finished = true
+            for (item in mine) if (!play(item, name)) { finished = false; break }
+            // A note cut short (the camera lost the face for a moment) is tried again soon, not after the long pause that follows a delivery.
+            if (finished) gate.delivered(name, SystemClock.elapsedRealtime()) else gate.checkedEmpty(name, SystemClock.elapsedRealtime())
+        }
+    }
+
+    /** Plays one note and waits for it; false when it was cut short because the person is no longer the one in front of the camera. */
+    private suspend fun play(item: WaitingNote, name: String): Boolean {
+        val started = audioClient.post("/notes/play", JSONObject().put("id", item.id).put("announce", true))
+        if (started == null || started.first != 200) { note = "Записка не проигралась: ${started?.second?.optString("error") ?: "нет ответа"}"; return false }
+        note = "Записка для $name"
+        var idleRounds = 0
+        while (idleRounds < 3) {
+            delay(250)
+            lastActivityAt = SystemClock.elapsedRealtime()
+            val now = SystemClock.elapsedRealtime()
+            val still = badgeText(now) == name
+            if (!still) { audioClient.post("/notes/play/stop", JSONObject()); note = "Записка прервана: $name ушёл"; return false }
+            val state = audioClient.get("/status")?.second?.optJSONObject("notes")?.optString("state")
+            idleRounds = if (state == "idle") idleRounds + 1 else 0
+        }
+        return true
     }
 
     private suspend fun loop() {
