@@ -57,7 +57,8 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun Screen(brain: Brain, background: (() -> Unit) -> Unit) {
-    var panel by remember { mutableStateOf(true) }
+    // Only the face by default; a touch shows the panel with the modules and the buttons (for looking and for the odd manual start).
+    var panel by remember { mutableStateOf(false) }
     var now by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
     LaunchedEffect(Unit) { while (true) { now = SystemClock.elapsedRealtime(); delay(100) } }
     Box(Modifier.fillMaxSize().background(Color.Black).clickable { brain.touch(); panel = !panel }) {
@@ -125,6 +126,6 @@ private fun Panel(brain: Brain, background: (() -> Unit) -> Unit, modifier: Modi
                 Text(if (brain.tracking) "Не следить" else "Следить за лицом", fontSize = 13.sp)
             }
         }
-        Text("Нажмите на лицо, чтобы скрыть или показать панель.", color = Color(0xff7d8a83), fontSize = 12.sp)
+        Text("Нажмите на лицо, чтобы скрыть панель.", color = Color(0xff7d8a83), fontSize = 12.sp)
     }
 }

@@ -50,21 +50,20 @@ class Brain(context: Context) {
         note = if (problems.isEmpty()) "Модули запущены" else problems.joinToString("; ")
     }
 
-    /** Switches the camera to the front lens and turns the face detector on (or off and back). */
+    /** Turns the face detector on (or off). The camera of this project looks at people by default; if somebody chose the back one, it is switched to front. */
     fun switchTracking(on: Boolean) {
         if (on) {
             val status = cameraClient.get("/status")?.second
             if (status == null) { note = "Камера не отвечает"; return }
-            // Remember the lens to give back, but never "front": if a front camera was left over from before, back is the safe answer.
-            status.optString("lens", "back").takeIf { it != "front" }?.let { prefs.edit().putString("lens_before", it).apply() }
-            val lens = cameraClient.post("/camera", JSONObject().put("lens", "front"))
-            if (lens == null || lens.first != 200) { note = "Не удалось включить фронтальную камеру: ${lens?.second?.optString("error") ?: "нет ответа"}"; return }
+            if (status.optString("lens") != "front") {
+                val lens = cameraClient.post("/camera", JSONObject().put("lens", "front"))
+                if (lens == null || lens.first != 200) { note = "Не удалось включить фронтальную камеру: ${lens?.second?.optString("error") ?: "нет ответа"}"; return }
+            }
             val lab = cameraClient.post("/faces", JSONObject().put("enabled", true).put("mode", "C"))
             if (lab == null || lab.first != 200) { note = "Не удалось включить слежение: ${lab?.second?.optString("error") ?: "нет ответа"}"; return }
             tracking = true; prefs.edit().putBoolean("want_tracking", true).apply(); note = "Слежение за лицом включено"
         } else {
             cameraClient.post("/faces", JSONObject().put("enabled", false))
-            cameraClient.post("/camera", JSONObject().put("lens", prefs.getString("lens_before", "back")))
             tracking = false; face = null; prefs.edit().putBoolean("want_tracking", false).apply(); note = "Слежение выключено"
         }
     }
@@ -78,6 +77,9 @@ class Brain(context: Context) {
 
     /** The polling loop; call it from a background coroutine and cancel it when the screen goes away. */
     suspend fun run() {
+        // The app opens on the face and brings everything up by itself: both services are started from this visible app,
+        // then the loop below keeps them running and switches the face tracking on.
+        startModules()
         var round = 0
         while (true) {
             if (round % 5 == 0) refreshStatus()
