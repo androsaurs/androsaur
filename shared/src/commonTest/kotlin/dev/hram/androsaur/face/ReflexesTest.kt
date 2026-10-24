@@ -2,6 +2,7 @@ package dev.hram.androsaur.face
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class ReflexesTest {
@@ -26,6 +27,23 @@ class ReflexesTest {
         assertEquals(0.0, Reflexes.gaze(0.5, 0.5).first, 1e-9)
         assertTrue(Reflexes.gaze(0.5, 0.9).second > 0.5, "lower in the picture means down")
         assertEquals(1.0, Reflexes.gaze(-3.0, 0.5).first, 1e-9)
+    }
+
+    @Test fun theNameShowsAfterRecognitionAndFadesWhenTheTalkEnds() {
+        assertTrue(Reflexes.badgeVisible(2_000, recognizedAt = 1_500, lastWakeAt = 1_000, lastFaceAt = 1_900))
+        assertTrue(Reflexes.badgeVisible(11_000, recognizedAt = 1_500, lastWakeAt = 1_000, lastFaceAt = 10_800))
+        assertFalse(Reflexes.badgeVisible(12_000, recognizedAt = 1_500, lastWakeAt = 1_000, lastFaceAt = 11_900))
+    }
+
+    @Test fun anotherWakeWordKeepsTheNameLonger() {
+        assertFalse(Reflexes.badgeVisible(13_000, recognizedAt = 1_500, lastWakeAt = 1_000, lastFaceAt = 12_900))
+        assertTrue(Reflexes.badgeVisible(13_000, recognizedAt = 1_500, lastWakeAt = 8_000, lastFaceAt = 12_900))
+    }
+
+    @Test fun theNameGoesWhenThePersonLeavesAndNeverShowsUnrecognized() {
+        assertFalse(Reflexes.badgeVisible(5_000, recognizedAt = 1_500, lastWakeAt = 1_000, lastFaceAt = 500))
+        assertFalse(Reflexes.badgeVisible(5_000, recognizedAt = 1_500, lastWakeAt = 1_000, lastFaceAt = null))
+        assertFalse(Reflexes.badgeVisible(5_000, recognizedAt = null, lastWakeAt = 1_000, lastFaceAt = 4_900))
     }
 
     @Test fun driftMovesEveryPeriodAndStaysInRange() {

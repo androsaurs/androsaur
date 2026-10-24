@@ -19,6 +19,21 @@ object Reflexes {
         else -> Expression.NEUTRAL
     }
 
+    const val BADGE_MS = 10_000L
+    const val FACE_GONE_MS = 4_000L
+
+    /**
+     * Whether the name of the person who woke the assistant is shown. It appears when the camera has recognized them and stays while the
+     * conversation goes on: [BADGE_MS] after the later of the recognition and the last wake word. It goes at once when the person is not
+     * in front of the camera any more (no face for [FACE_GONE_MS]), and never shows without a recognition.
+     */
+    fun badgeVisible(now: Long, recognizedAt: Long?, lastWakeAt: Long?, lastFaceAt: Long?): Boolean {
+        if (recognizedAt == null || lastFaceAt == null) return false
+        if (now - lastFaceAt > FACE_GONE_MS) return false
+        val last = maxOf(recognizedAt, lastWakeAt ?: Long.MIN_VALUE)
+        return now - last in 0..BADGE_MS
+    }
+
     /**
      * Where the eyes look, -1..1 on each axis (x to the right of the screen, y down), for a face whose centre is at
      * ([cx], [cy]) as fractions 0..1 of the unmirrored camera image. The screen is a mirror: a person on the left of the picture

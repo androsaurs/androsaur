@@ -30,6 +30,13 @@ class Brain(context: Context) {
     @Volatile var lastWakeAt: Long? = null; private set
     @Volatile var wakeText: String = ""; private set
     @Volatile var lastActivityAt = SystemClock.elapsedRealtime(); private set
+    @Volatile var lastFaceAt: Long? = null; private set
+    /** Who said the wake word: a name, or "Не узнаю" for a face the camera does not know; shown while [Reflexes.badgeVisible] holds. */
+    @Volatile var badge: String = ""; private set
+    @Volatile var recognizedAt: Long? = null; private set
+    private var identifySince = 0L
+    private var identifyUntil = 0L
+    private var sawStranger = false
     private var lastEventId = -1L
 
     fun touch() { lastActivityAt = SystemClock.elapsedRealtime() }
@@ -48,16 +55,17 @@ class Brain(context: Context) {
         if (on) {
             val status = cameraClient.get("/status")?.second
             if (status == null) { note = "Камера не отвечает"; return }
-            prefs.edit().putString("lens_before", status.optString("lens", "back")).apply()
+            // Remember the lens to give back, but never "front": if a front camera was left over from before, back is the safe answer.
+            status.optString("lens", "back").takeIf { it != "front" }?.let { prefs.edit().putString("lens_before", it).apply() }
             val lens = cameraClient.post("/camera", JSONObject().put("lens", "front"))
             if (lens == null || lens.first != 200) { note = "Не удалось включить фронтальную камеру: ${lens?.second?.optString("error") ?: "нет ответа"}"; return }
             val lab = cameraClient.post("/faces", JSONObject().put("enabled", true).put("mode", "C"))
             if (lab == null || lab.first != 200) { note = "Не удалось включить слежение: ${lab?.second?.optString("error") ?: "нет ответа"}"; return }
-            tracking = true; note = "Слежение за лицом включено"
+            tracking = true; prefs.edit().putBoolean("want_tracking", true).apply(); note = "Слежение за лицом включено"
         } else {
             cameraClient.post("/faces", JSONObject().put("enabled", false))
             cameraClient.post("/camera", JSONObject().put("lens", prefs.getString("lens_before", "back")))
-            tracking = false; face = null; note = "Слежение выключено"
+            tracking = false; face = null; prefs.edit().putBoolean("want_tracking", false).apply(); note = "Слежение выключено"
         }
     }
 
@@ -73,11 +81,19 @@ class Brain(context: Context) {
         var round = 0
         while (true) {
             if (round % 5 == 0) refreshStatus()
+            if (round % 20 == 0) autoTrack()
             pollEvents()
             if (tracking) pollFace()
+            if (identifyUntil != 0L) pollIdentity()
             round++
             delay(250)
         }
+    }
+
+    /** Watching the person is the normal state: unless the owner switched tracking off, it is switched on as soon as the camera answers. */
+    private fun autoTrack() {
+        if (tracking || !camera.running || !prefs.getBoolean("want_tracking", true)) return
+        switchTracking(true)
     }
 
     private fun refreshStatus() {
@@ -99,10 +115,26 @@ class Brain(context: Context) {
         }
     }
 
+    private val silentRounds = mutableMapOf<String, Int>()
+    private val lastRestartAt = mutableMapOf<String, Long>()
+
     private fun refresh(client: ModuleClient, summarize: (JSONObject) -> Pair<List<String>, String?>): ModuleUi {
         val link = client.connect()
         if (link != "ready") return ModuleUi(client.label, describe(link))
-        val reply = client.get("/status") ?: return ModuleUi(client.label, "связь есть, сервис не отвечает (не запущен)")
+        val reply = client.get("/status")
+        if (reply == null) {
+            // The module's service is gone (killed or updated; Android does not bring it back). This app is on screen, so it may start it again.
+            val misses = (silentRounds[client.id] ?: 0) + 1
+            silentRounds[client.id] = misses
+            val now = SystemClock.elapsedRealtime()
+            if (misses >= 3 && now - (lastRestartAt[client.id] ?: 0L) > 15_000) {
+                lastRestartAt[client.id] = now
+                val problem = client.start()
+                note = if (problem == null) "${client.label}: сервис не отвечал, запущен заново" else "${client.label}: не удалось запустить заново (${describe(problem)})"
+            }
+            return ModuleUi(client.label, "связь есть, сервис не отвечает (запускаю заново)")
+        }
+        silentRounds[client.id] = 0
         if (reply.first != 200) return ModuleUi(client.label, "ответ ${reply.first}")
         val (lines, error) = summarize(reply.second)
         return ModuleUi(client.label, "на связи", running = true, lines = lines, error = error)
@@ -123,17 +155,53 @@ class Brain(context: Context) {
             if (e.optString("type") == "wake_word") {
                 lastWakeAt = SystemClock.elapsedRealtime(); lastActivityAt = lastWakeAt!!
                 wakeText = e.optJSONObject("data")?.optString("heard").orEmpty()
+                startIdentify()
             }
+        }
+    }
+
+    /** The wake word was heard: ask the camera who is in front of it. Only when it is already watching (tracking is on). */
+    private fun startIdentify() {
+        if (!tracking) return
+        val reply = cameraClient.post("/people/identify", JSONObject().put("ms", IDENTIFY_MS))
+        if (reply == null || reply.first != 200) { note = "Опознание не началось: ${reply?.second?.optString("error") ?: "нет ответа"}"; return }
+        identifySince = SystemClock.elapsedRealtime(); identifyUntil = identifySince + IDENTIFY_MS + 300; sawStranger = false
+    }
+
+    /** Reads what the camera has made of the face: the first name wins, a face it does not know shows as such when the window ends. */
+    private fun pollIdentity() {
+        val now = SystemClock.elapsedRealtime()
+        val who = cameraClient.get("/people")?.second?.optJSONObject("who")
+        // Only a result made after the wake word counts, not one left from earlier.
+        if (who != null && who.optLong("ageMs", Long.MAX_VALUE) <= now - identifySince + 200) {
+            val name = if (who.isNull("name")) null else who.optString("name")
+            if (name != null) { badge = name; recognizedAt = now; identifyUntil = 0L; return }
+            sawStranger = true
+        }
+        if (now > identifyUntil) {
+            identifyUntil = 0L
+            if (sawStranger) { badge = "Не узнаю"; recognizedAt = now }
         }
     }
 
     private fun pollFace() {
         val reply = cameraClient.get("/faces")?.second ?: return
+        if (!reply.optBoolean("enabled", false)) {
+            // The camera restarted and forgot the tracking this app asked for: ask again.
+            val again = cameraClient.post("/faces", JSONObject().put("enabled", true).put("mode", "C"))
+            if (again == null || again.first != 200) { note = "Слежение не вернулось: ${again?.second?.optString("error") ?: "нет ответа"}" }
+            return
+        }
         val boxes = reply.optJSONObject("mediapipe")?.optJSONArray("lastBoxes")
         val first = if (boxes != null && boxes.length() > 0) boxes.getJSONObject(0) else null
         face = first?.let { (it.optDouble("x") + it.optDouble("w") / 2) to (it.optDouble("y") + it.optDouble("h") / 2) }
-        if (face != null) lastActivityAt = SystemClock.elapsedRealtime()
+        if (face != null) { lastActivityAt = SystemClock.elapsedRealtime(); lastFaceAt = lastActivityAt }
     }
+
+    /** The name to draw under the face now, or an empty text when none should be shown. */
+    fun badgeText(now: Long): String = if (Reflexes.badgeVisible(now, recognizedAt, lastWakeAt, lastFaceAt)) badge else ""
+
+    private companion object { const val IDENTIFY_MS = 3500L }
 
     fun expression(now: Long) = Reflexes.expression(now, lastWakeAt, face != null, lastActivityAt)
 }

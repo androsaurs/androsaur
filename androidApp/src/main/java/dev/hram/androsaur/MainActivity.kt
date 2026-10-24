@@ -70,6 +70,11 @@ private fun Screen(brain: Brain, background: (() -> Unit) -> Unit) {
 
 @Composable
 private fun Face(brain: Brain, now: Long) {
+    val badge = brain.badgeText(now)
+    // The name stays on screen while the text of the last non-empty badge fades out, instead of vanishing in one frame.
+    var shown by remember { mutableStateOf("") }
+    if (badge.isNotEmpty()) shown = badge
+    val alpha by animateFloatAsState(if (badge.isNotEmpty()) 1f else 0f, tween(500), label = "badge")
     val expression = brain.expression(now)
     val gaze = brain.face?.let { Reflexes.gaze(it.first, it.second) } ?: (0.0 to 0.0)
     val eyeScale by animateFloatAsState(when (expression) { Expression.LISTENING -> 1.2f; Expression.ATTENTIVE -> 1.1f; Expression.SLEEPY -> 0.9f; else -> 1f }, tween(300), label = "eye")
@@ -79,6 +84,7 @@ private fun Face(brain: Brain, now: Long) {
     val (dx, dy) = Reflexes.drift(now)
     val driftX by animateFloatAsState(dx.toFloat(), tween(4000), label = "dx")
     val driftY by animateFloatAsState(dy.toFloat(), tween(4000), label = "dy")
+    Box(Modifier.fillMaxSize()) {
     Canvas(Modifier.fillMaxSize()) {
         val room = 14.dp.toPx()
         val c = Offset(size.width / 2 + driftX * room, size.height / 2 + driftY * room)
@@ -97,6 +103,8 @@ private fun Face(brain: Brain, now: Long) {
             Expression.ATTENTIVE -> drawArc(Color.White, 20f, 140f, false, Offset(mouth.x - w, mouth.y - w * 0.7f), Size(2 * w, 1.4f * w), style = Stroke(6.dp.toPx(), cap = StrokeCap.Round))
             else -> drawLine(Color.White, Offset(mouth.x - w * 0.6f, mouth.y), Offset(mouth.x + w * 0.6f, mouth.y), strokeWidth = 6.dp.toPx(), cap = StrokeCap.Round)
         }
+    }
+    if (alpha > 0.01f) Text(shown, color = Color.White.copy(alpha = alpha), fontSize = 34.sp, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp))
     }
 }
 
