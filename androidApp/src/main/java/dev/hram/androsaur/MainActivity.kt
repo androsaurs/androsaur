@@ -1,0 +1,122 @@
+package dev.hram.androsaur
+
+import android.os.Bundle
+import android.os.SystemClock
+import android.view.WindowManager
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import dev.hram.androsaur.face.Expression
+import dev.hram.androsaur.face.Reflexes
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+/** The face and the control panel of the main app: always on screen, the modules are started from here and watched from here. */
+class MainActivity : ComponentActivity() {
+    private lateinit var brain: Brain
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        WindowInsetsControllerCompat(window, window.decorView).apply {
+            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            hide(WindowInsetsCompat.Type.systemBars())
+        }
+        brain = Brain(applicationContext)
+        lifecycleScope.launch { repeatOnLifecycle(Lifecycle.State.STARTED) { withContext(Dispatchers.IO) { brain.run() } } }
+        setContent { MaterialTheme(colorScheme = darkColorScheme(primary = Color(0xff63e6a4))) { Screen(brain) { work -> lifecycleScope.launch(Dispatchers.IO) { work() } } } }
+    }
+}
+
+@Composable
+private fun Screen(brain: Brain, background: (() -> Unit) -> Unit) {
+    var panel by remember { mutableStateOf(true) }
+    var now by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
+    LaunchedEffect(Unit) { while (true) { now = SystemClock.elapsedRealtime(); delay(100) } }
+    Box(Modifier.fillMaxSize().background(Color.Black).clickable { brain.touch(); panel = !panel }) {
+        Column(Modifier.fillMaxSize().safeDrawingPadding()) {
+            Box(Modifier.weight(if (panel) 0.5f else 1f).fillMaxWidth()) { Face(brain, now) }
+            if (panel) Panel(brain, background, Modifier.weight(0.5f))
+        }
+    }
+}
+
+@Composable
+private fun Face(brain: Brain, now: Long) {
+    val expression = brain.expression(now)
+    val gaze = brain.face?.let { Reflexes.gaze(it.first, it.second) } ?: (0.0 to 0.0)
+    val eyeScale by animateFloatAsState(when (expression) { Expression.LISTENING -> 1.2f; Expression.ATTENTIVE -> 1.1f; Expression.SLEEPY -> 0.9f; else -> 1f }, tween(300), label = "eye")
+    val lid by animateFloatAsState(if (expression == Expression.SLEEPY) 0.6f else 0f, tween(600), label = "lid")
+    val gx by animateFloatAsState(gaze.first.toFloat(), tween(180), label = "gx")
+    val gy by animateFloatAsState(gaze.second.toFloat(), tween(180), label = "gy")
+    val (dx, dy) = Reflexes.drift(now)
+    val driftX by animateFloatAsState(dx.toFloat(), tween(4000), label = "dx")
+    val driftY by animateFloatAsState(dy.toFloat(), tween(4000), label = "dy")
+    Canvas(Modifier.fillMaxSize()) {
+        val room = 14.dp.toPx()
+        val c = Offset(size.width / 2 + driftX * room, size.height / 2 + driftY * room)
+        val r = minOf(size.width * 0.17f, size.height * 0.28f) * eyeScale
+        val gap = size.width * 0.22f
+        for (side in listOf(-1f, 1f)) {
+            val eye = Offset(c.x + side * gap, c.y - size.height * 0.08f)
+            drawCircle(Color.White, r, eye)
+            drawCircle(Color.Black, r * 0.45f, Offset(eye.x + gx * r * 0.45f, eye.y + gy * r * 0.45f))
+            if (lid > 0f) drawRect(Color.Black, Offset(eye.x - r - 1, eye.y - r - 1), Size(2 * r + 2, 2 * r * lid + 1))
+        }
+        val mouth = Offset(c.x, c.y + size.height * 0.26f)
+        val w = size.width * 0.16f
+        when (expression) {
+            Expression.LISTENING -> drawOval(Color.White, Offset(mouth.x - w * 0.45f, mouth.y - w * 0.2f), Size(w * 0.9f, w * 0.8f))
+            Expression.ATTENTIVE -> drawArc(Color.White, 20f, 140f, false, Offset(mouth.x - w, mouth.y - w * 0.7f), Size(2 * w, 1.4f * w), style = Stroke(6.dp.toPx(), cap = StrokeCap.Round))
+            else -> drawLine(Color.White, Offset(mouth.x - w * 0.6f, mouth.y), Offset(mouth.x + w * 0.6f, mouth.y), strokeWidth = 6.dp.toPx(), cap = StrokeCap.Round)
+        }
+    }
+}
+
+@Composable
+private fun Panel(brain: Brain, background: (() -> Unit) -> Unit, modifier: Modifier) {
+    Column(modifier.fillMaxWidth().background(Color(0xff111815)).verticalScroll(rememberScrollState()).padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("Androsaur · каркас", color = Color.White, fontSize = 18.sp)
+        brain.note?.let { Text(it, color = Color(0xffffb454), fontSize = 14.sp) }
+        if (brain.wakeText.isNotEmpty() && brain.lastWakeAt != null) Text("Последнее срабатывание: ${brain.wakeText}", color = Color(0xff63e6a4), fontSize = 13.sp)
+        for (m in listOf(brain.audio, brain.camera)) {
+            Text("${m.label}: ${m.link}", color = if (m.running) Color.White else Color(0xffffb454), fontSize = 15.sp)
+            m.lines.forEach { Text(it, color = Color(0xffc5cfc9), fontSize = 13.sp) }
+            m.error?.let { Text("ошибка: $it", color = Color(0xffffb454), fontSize = 13.sp) }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Button(onClick = { background { brain.startModules() } }, modifier = Modifier.weight(1f)) { Text("Запустить модули", fontSize = 13.sp) }
+            OutlinedButton(onClick = { background { brain.switchTracking(!brain.tracking) } }, modifier = Modifier.weight(1f)) {
+                Text(if (brain.tracking) "Не следить" else "Следить за лицом", fontSize = 13.sp)
+            }
+        }
+        Text("Нажмите на лицо, чтобы скрыть или показать панель.", color = Color(0xff7d8a83), fontSize = 12.sp)
+    }
+}
