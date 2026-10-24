@@ -114,7 +114,21 @@ private fun Face(brain: Brain, now: Long) {
             }
         }
     }
-    if (alpha > 0.01f) Text(shown, color = Color.White.copy(alpha = alpha), fontSize = 34.sp, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp))
+    // What to do now, in words: the person should never wonder whether to talk.
+    when (brain.mode) {
+        "command" -> Caption("Слушаю", "скажите: «передай жене …»", Modifier.align(Alignment.BottomCenter))
+        "recording" -> Caption("● Говорите, идёт запись", "после паузы запись закончится сама", Modifier.align(Alignment.BottomCenter), Color(0xffff6b5e))
+        "note" -> Caption("Играет записка", null, Modifier.align(Alignment.BottomCenter))
+        else -> if (alpha > 0.01f) Text(shown, color = Color.White.copy(alpha = alpha), fontSize = 34.sp, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp))
+    }
+    }
+}
+
+@Composable
+private fun Caption(title: String, hint: String?, modifier: Modifier, color: Color = Color.White) {
+    Column(modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(title, color = color, fontSize = 28.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        if (hint != null) Text(hint, color = Color.White.copy(alpha = 0.6f), fontSize = 18.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
     }
 }
 

@@ -42,12 +42,16 @@ class Brain(context: Context) {
     /** Whether the audio module is speaking and how wide the mouth is (0..1), from its own loudness of the sound that plays. */
     @Volatile var speaking = false; private set
     @Volatile var mouth = 0f; private set
+    /** What the audio module waits for besides speech: `command`, `recording`, `note` or empty; the face says it in words so the person knows when to talk. */
+    @Volatile var mode = ""; private set
     private var identifySince = 0L
     private var identifyUntil = 0L
     private var sawStranger = false
     private var wasPresent = false
     private var nextIdentifyAt = 0L
     private var lastEventId = -1L
+    /** The run of the audio service the event numbers belong to; a restarted service numbers its events from 1 again. */
+    private var audioBoot = ""
 
     fun touch() { lastActivityAt = SystemClock.elapsedRealtime() }
 
@@ -89,6 +93,7 @@ class Brain(context: Context) {
     suspend fun run() = coroutineScope {
         launch { followMouth() }
         launch { deliverNotes() }
+        launch { shareContext() }
         loop()
     }
 
@@ -97,6 +102,8 @@ class Brain(context: Context) {
         while (true) {
             val reply = if (audio.running) audioClient.get("/speech")?.second else null
             speaking = reply?.optBoolean("speaking") == true
+            mode = reply?.optString("mode").orEmpty()
+            if (mode.isNotEmpty()) lastActivityAt = SystemClock.elapsedRealtime()
             mouth = if (speaking) reply!!.optDouble("mouth", 0.0).toFloat() else 0f
             if (speaking) lastActivityAt = SystemClock.elapsedRealtime()
             delay(if (speaking) 60 else 400)
@@ -104,6 +111,31 @@ class Brain(context: Context) {
     }
 
     private val gate = DeliveryGate()
+
+    /**
+     * Tells the audio module who is in front of the camera (so a note left by voice says who left it) and which people the camera
+     * knows (so they can be named as recipients). The name is sent when it changes and every few seconds besides, as the module
+     * forgets a name that is not renewed.
+     */
+    private suspend fun shareContext() {
+        var sent: String? = null
+        var sentAt = 0L
+        var peopleAt = 0L
+        while (true) {
+            delay(1000)
+            if (!audio.running) { sent = null; continue }
+            val now = SystemClock.elapsedRealtime()
+            val name = badgeText(now).takeIf { it.isNotEmpty() && it != UNKNOWN } ?: ""
+            if (name != sent || now - sentAt > 5000) {
+                if (audioClient.post("/context", JSONObject().put("person", name))?.first == 200) { sent = name; sentAt = now }
+            }
+            if (camera.running && now - peopleAt > 30_000) {
+                val people = cameraClient.get("/people")?.second?.optJSONArray("people") ?: continue
+                val names = org.json.JSONArray(List(people.length()) { people.getJSONObject(it).optString("name") }.filter { it.isNotEmpty() })
+                if (audioClient.post("/recipients", JSONObject().put("addNames", names))?.first == 200) peopleAt = now
+            }
+        }
+    }
 
     /** Roles for people («жена» to the name the camera knows), kept in the preferences as JSON; notes for a role go to that person. */
     private fun aliases(): Map<String, String> = runCatching {
@@ -178,6 +210,12 @@ class Brain(context: Context) {
 
     private fun refreshStatus() {
         audio = refresh(audioClient) { s ->
+            val boot = s.optString("bootId")
+            if (boot.isNotEmpty() && boot != audioBoot) {
+                // A service that restarted while this app ran: its events are all new, read them from the start.
+                if (audioBoot.isNotEmpty()) lastEventId = 0
+                audioBoot = boot
+            }
             val engine = s.optJSONObject("engine")
             listOfNotNull(
                 if (s.optBoolean("listening")) "слушает" else "не слушает",
