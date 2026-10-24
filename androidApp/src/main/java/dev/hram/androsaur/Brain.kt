@@ -6,7 +6,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import dev.hram.androsaur.face.Reflexes
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 
 /** What the screen shows about one module. */
@@ -34,9 +36,14 @@ class Brain(context: Context) {
     /** Who said the wake word: a name, or "Не узнаю" for a face the camera does not know; shown while [Reflexes.badgeVisible] holds. */
     @Volatile var badge: String = ""; private set
     @Volatile var recognizedAt: Long? = null; private set
+    /** Whether the audio module is speaking and how wide the mouth is (0..1), from its own loudness of the sound that plays. */
+    @Volatile var speaking = false; private set
+    @Volatile var mouth = 0f; private set
     private var identifySince = 0L
     private var identifyUntil = 0L
     private var sawStranger = false
+    private var wasPresent = false
+    private var nextIdentifyAt = 0L
     private var lastEventId = -1L
 
     fun touch() { lastActivityAt = SystemClock.elapsedRealtime() }
@@ -76,7 +83,23 @@ class Brain(context: Context) {
     }
 
     /** The polling loop; call it from a background coroutine and cancel it when the screen goes away. */
-    suspend fun run() {
+    suspend fun run() = coroutineScope {
+        launch { followMouth() }
+        loop()
+    }
+
+    /** Polls the speech state fast while the assistant talks (the mouth needs about 15 updates a second) and slowly while it is quiet. */
+    private suspend fun followMouth() {
+        while (true) {
+            val reply = if (audio.running) audioClient.get("/speech")?.second else null
+            speaking = reply?.optBoolean("speaking") == true
+            mouth = if (speaking) reply!!.optDouble("mouth", 0.0).toFloat() else 0f
+            if (speaking) lastActivityAt = SystemClock.elapsedRealtime()
+            delay(if (speaking) 60 else 400)
+        }
+    }
+
+    private suspend fun loop() {
         // The app opens on the face and brings everything up by itself: both services are started from this visible app,
         // then the loop below keeps them running and switches the face tracking on.
         startModules()
@@ -85,7 +108,7 @@ class Brain(context: Context) {
             if (round % 5 == 0) refreshStatus()
             if (round % 20 == 0) autoTrack()
             pollEvents()
-            if (tracking) pollFace()
+            if (tracking) { pollFace(); watchArrival() }
             if (identifyUntil != 0L) pollIdentity()
             round++
             delay(250)
@@ -162,12 +185,26 @@ class Brain(context: Context) {
         }
     }
 
-    /** The wake word was heard: ask the camera who is in front of it. Only when it is already watching (tracking is on). */
-    private fun startIdentify() {
+    /**
+     * Somebody comes into view: forget who was there before and ask the camera who this is at once. While a face stays in view
+     * it is asked again: soon after a failure (the first look may be a turned head or a blur), rarely after a success, so that
+     * another person who steps in without a gap in between does not keep the name of the one before.
+     */
+    private fun watchArrival() {
+        val now = SystemClock.elapsedRealtime()
+        val here = Reflexes.present(now, lastFaceAt)
+        if (here && !wasPresent) { badge = ""; recognizedAt = null; nextIdentifyAt = 0L }
+        wasPresent = here
+        if (here && identifyUntil == 0L && now >= nextIdentifyAt) startIdentify(if (recognizedAt != null && badge != UNKNOWN) RECHECK_MS else IDENTIFY_MS)
+    }
+
+    /** Asks the camera who is in front of it (at a person's arrival and at the wake word). Only when it is already watching (tracking is on). */
+    private fun startIdentify(ms: Long = IDENTIFY_MS) {
         if (!tracking) return
-        val reply = cameraClient.post("/people/identify", JSONObject().put("ms", IDENTIFY_MS))
+        nextIdentifyAt = SystemClock.elapsedRealtime() + if (badge == UNKNOWN || recognizedAt == null) RETRY_IDENTIFY_MS else RECHECK_EVERY_MS
+        val reply = cameraClient.post("/people/identify", JSONObject().put("ms", ms))
         if (reply == null || reply.first != 200) { note = "Опознание не началось: ${reply?.second?.optString("error") ?: "нет ответа"}"; return }
-        identifySince = SystemClock.elapsedRealtime(); identifyUntil = identifySince + IDENTIFY_MS + 300; sawStranger = false
+        identifySince = SystemClock.elapsedRealtime(); identifyUntil = identifySince + ms + 300; sawStranger = false
     }
 
     /** Reads what the camera has made of the face: the first name wins, a face it does not know shows as such when the window ends. */
@@ -182,7 +219,7 @@ class Brain(context: Context) {
         }
         if (now > identifyUntil) {
             identifyUntil = 0L
-            if (sawStranger) { badge = "Не узнаю"; recognizedAt = now }
+            if (sawStranger) { badge = UNKNOWN; recognizedAt = now }
         }
     }
 
@@ -201,9 +238,10 @@ class Brain(context: Context) {
     }
 
     /** The name to draw under the face now, or an empty text when none should be shown. */
-    fun badgeText(now: Long): String = if (Reflexes.badgeVisible(now, recognizedAt, lastWakeAt, lastFaceAt)) badge else ""
+    fun badgeText(now: Long): String = if (Reflexes.badgeVisible(now, recognizedAt, lastFaceAt)) badge else ""
 
-    private companion object { const val IDENTIFY_MS = 3500L }
+    private companion object { const val IDENTIFY_MS = 3500L; const val RETRY_IDENTIFY_MS = 6000L
+        const val RECHECK_MS = 2000L; const val RECHECK_EVERY_MS = 5000L; const val UNKNOWN = "Не узнаю" }
 
-    fun expression(now: Long) = Reflexes.expression(now, lastWakeAt, face != null, lastActivityAt)
+    fun expression(now: Long) = Reflexes.expression(now, lastWakeAt, Reflexes.present(now, lastFaceAt), lastActivityAt, watching = tracking)
 }

@@ -1,7 +1,7 @@
 package dev.hram.androsaur.face
 
 /** What the face on the screen shows. */
-enum class Expression { NEUTRAL, ATTENTIVE, LISTENING, SLEEPY }
+enum class Expression { NEUTRAL, ATTENTIVE, LISTENING, SLEEPY, SAD }
 
 /**
  * The "reflexes": quick rules that turn what the modules report into an expression and a gaze, with no LLM in between.
@@ -11,28 +11,28 @@ object Reflexes {
     const val LISTENING_FOR_MS = 3_000L
     const val SLEEPY_AFTER_MS = 120_000L
 
-    /** The wake word wins for a few seconds, then a visible face makes the face attentive, a long silence makes it sleepy. */
-    fun expression(now: Long, lastWakeAt: Long?, faceSeen: Boolean, lastActivityAt: Long): Expression = when {
+    /**
+     * The wake word wins for a few seconds, then a visible face makes the face attentive, a long silence makes it sleepy.
+     * While it is [watching] and nobody is there it is sad; when it is not watching (no camera) it has no reason to be.
+     */
+    fun expression(now: Long, lastWakeAt: Long?, faceSeen: Boolean, lastActivityAt: Long, watching: Boolean = false): Expression = when {
         lastWakeAt != null && now - lastWakeAt in 0..LISTENING_FOR_MS -> Expression.LISTENING
         faceSeen -> Expression.ATTENTIVE
         now - lastActivityAt > SLEEPY_AFTER_MS -> Expression.SLEEPY
+        watching -> Expression.SAD
         else -> Expression.NEUTRAL
     }
 
-    const val BADGE_MS = 10_000L
     const val FACE_GONE_MS = 4_000L
 
+    /** Whether somebody is in front of the camera: a face was seen within [FACE_GONE_MS] (detections flicker, so a short gap is not a departure). A face stamped a moment after [now] was taken (another thread) still counts as present. */
+    fun present(now: Long, lastFaceAt: Long?): Boolean = lastFaceAt != null && now - lastFaceAt <= FACE_GONE_MS
+
     /**
-     * Whether the name of the person who woke the assistant is shown. It appears when the camera has recognized them and stays while the
-     * conversation goes on: [BADGE_MS] after the later of the recognition and the last wake word. It goes at once when the person is not
-     * in front of the camera any more (no face for [FACE_GONE_MS]), and never shows without a recognition.
+     * Whether the name of the person in front of the camera is shown: from the recognition until they leave
+     * (no face for [FACE_GONE_MS]). It never shows without a recognition.
      */
-    fun badgeVisible(now: Long, recognizedAt: Long?, lastWakeAt: Long?, lastFaceAt: Long?): Boolean {
-        if (recognizedAt == null || lastFaceAt == null) return false
-        if (now - lastFaceAt > FACE_GONE_MS) return false
-        val last = maxOf(recognizedAt, lastWakeAt ?: Long.MIN_VALUE)
-        return now - last in 0..BADGE_MS
-    }
+    fun badgeVisible(now: Long, recognizedAt: Long?, lastFaceAt: Long?): Boolean = recognizedAt != null && present(now, lastFaceAt)
 
     /**
      * Where the eyes look, -1..1 on each axis (x to the right of the screen, y down), for a face whose centre is at

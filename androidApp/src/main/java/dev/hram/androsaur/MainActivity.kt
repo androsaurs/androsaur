@@ -78,8 +78,9 @@ private fun Face(brain: Brain, now: Long) {
     val alpha by animateFloatAsState(if (badge.isNotEmpty()) 1f else 0f, tween(500), label = "badge")
     val expression = brain.expression(now)
     val gaze = brain.face?.let { Reflexes.gaze(it.first, it.second) } ?: (0.0 to 0.0)
-    val eyeScale by animateFloatAsState(when (expression) { Expression.LISTENING -> 1.2f; Expression.ATTENTIVE -> 1.1f; Expression.SLEEPY -> 0.9f; else -> 1f }, tween(300), label = "eye")
-    val lid by animateFloatAsState(if (expression == Expression.SLEEPY) 0.6f else 0f, tween(600), label = "lid")
+    val eyeScale by animateFloatAsState(when (expression) { Expression.LISTENING -> 1.2f; Expression.ATTENTIVE -> 1.1f; Expression.SLEEPY -> 0.9f; Expression.SAD -> 0.95f; else -> 1f }, tween(300), label = "eye")
+    val lid by animateFloatAsState(when (expression) { Expression.SLEEPY -> 0.6f; Expression.SAD -> 0.25f; else -> 0f }, tween(600), label = "lid")
+    val mouthOpen by animateFloatAsState(if (brain.speaking) brain.mouth else 0f, tween(70), label = "mouth")
     val gx by animateFloatAsState(gaze.first.toFloat(), tween(180), label = "gx")
     val gy by animateFloatAsState(gaze.second.toFloat(), tween(180), label = "gy")
     val (dx, dy) = Reflexes.drift(now)
@@ -99,10 +100,18 @@ private fun Face(brain: Brain, now: Long) {
         }
         val mouth = Offset(c.x, c.y + size.height * 0.26f)
         val w = size.width * 0.16f
-        when (expression) {
+        when {
+            // Speaking: the mouth opens as far as the sound is loud.
+            brain.speaking -> {
+                val h = w * (0.12f + 0.8f * mouthOpen)
+                drawRoundRect(Color.White, Offset(mouth.x - w * 0.5f, mouth.y - h / 2), Size(w, h), androidx.compose.ui.geometry.CornerRadius(h / 2, h / 2))
+            }
+            else -> when (expression) {
             Expression.LISTENING -> drawOval(Color.White, Offset(mouth.x - w * 0.45f, mouth.y - w * 0.2f), Size(w * 0.9f, w * 0.8f))
             Expression.ATTENTIVE -> drawArc(Color.White, 20f, 140f, false, Offset(mouth.x - w, mouth.y - w * 0.7f), Size(2 * w, 1.4f * w), style = Stroke(6.dp.toPx(), cap = StrokeCap.Round))
+            Expression.SAD -> drawArc(Color.White, 200f, 140f, false, Offset(mouth.x - w, mouth.y - w * 0.2f), Size(2 * w, 1.4f * w), style = Stroke(6.dp.toPx(), cap = StrokeCap.Round))
             else -> drawLine(Color.White, Offset(mouth.x - w * 0.6f, mouth.y), Offset(mouth.x + w * 0.6f, mouth.y), strokeWidth = 6.dp.toPx(), cap = StrokeCap.Round)
+            }
         }
     }
     if (alpha > 0.01f) Text(shown, color = Color.White.copy(alpha = alpha), fontSize = 34.sp, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp))

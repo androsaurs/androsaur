@@ -29,22 +29,30 @@ class ReflexesTest {
         assertEquals(1.0, Reflexes.gaze(-3.0, 0.5).first, 1e-9)
     }
 
-    @Test fun theNameShowsAfterRecognitionAndFadesWhenTheTalkEnds() {
-        assertTrue(Reflexes.badgeVisible(2_000, recognizedAt = 1_500, lastWakeAt = 1_000, lastFaceAt = 1_900))
-        assertTrue(Reflexes.badgeVisible(11_000, recognizedAt = 1_500, lastWakeAt = 1_000, lastFaceAt = 10_800))
-        assertFalse(Reflexes.badgeVisible(12_000, recognizedAt = 1_500, lastWakeAt = 1_000, lastFaceAt = 11_900))
+    @Test fun nobodyThereMakesItSadOnlyWhileWatching() {
+        assertEquals(Expression.SAD, Reflexes.expression(5_000, null, faceSeen = false, lastActivityAt = 0, watching = true))
+        assertEquals(Expression.NEUTRAL, Reflexes.expression(5_000, null, faceSeen = false, lastActivityAt = 0, watching = false))
+        assertEquals(Expression.ATTENTIVE, Reflexes.expression(5_000, null, faceSeen = true, lastActivityAt = 0, watching = true))
+        assertEquals(Expression.SLEEPY, Reflexes.expression(200_000, null, faceSeen = false, lastActivityAt = 0, watching = true))
     }
 
-    @Test fun anotherWakeWordKeepsTheNameLonger() {
-        assertFalse(Reflexes.badgeVisible(13_000, recognizedAt = 1_500, lastWakeAt = 1_000, lastFaceAt = 12_900))
-        assertTrue(Reflexes.badgeVisible(13_000, recognizedAt = 1_500, lastWakeAt = 8_000, lastFaceAt = 12_900))
+    @Test fun aShortGapInDetectionIsNotADeparture() {
+        assertTrue(Reflexes.present(1_000, lastFaceAt = 500))
+        assertTrue(Reflexes.present(4_500, lastFaceAt = 500))
+        assertFalse(Reflexes.present(4_501, lastFaceAt = 500))
+        assertTrue(Reflexes.present(1_000, lastFaceAt = 1_030), "stamped just after the clock was read")
+        assertFalse(Reflexes.present(1_000, lastFaceAt = null))
     }
 
-    @Test fun theNameGoesWhenThePersonLeavesAndNeverShowsUnrecognized() {
-        assertFalse(Reflexes.badgeVisible(5_000, recognizedAt = 1_500, lastWakeAt = 1_000, lastFaceAt = 500))
-        assertFalse(Reflexes.badgeVisible(5_000, recognizedAt = 1_500, lastWakeAt = 1_000, lastFaceAt = null))
-        assertFalse(Reflexes.badgeVisible(5_000, recognizedAt = null, lastWakeAt = 1_000, lastFaceAt = 4_900))
+    @Test fun theNameStaysWhileThePersonIsThereAndGoesWhenTheyLeave() {
+        assertTrue(Reflexes.badgeVisible(2_000, recognizedAt = 1_500, lastFaceAt = 1_900))
+        assertTrue(Reflexes.badgeVisible(600_000, recognizedAt = 1_500, lastFaceAt = 599_900))
+        assertFalse(Reflexes.badgeVisible(6_000, recognizedAt = 1_500, lastFaceAt = 1_900))
+        assertFalse(Reflexes.badgeVisible(5_000, recognizedAt = 1_500, lastFaceAt = null))
     }
+
+    @Test fun theNameNeverShowsUnrecognized() =
+        assertFalse(Reflexes.badgeVisible(5_000, recognizedAt = null, lastFaceAt = 4_900))
 
     @Test fun driftMovesEveryPeriodAndStaysInRange() {
         val seen = (0 until 10).map { Reflexes.drift(it * 30_000L) }.toSet()
