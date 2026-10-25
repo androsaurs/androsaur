@@ -32,6 +32,10 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import dev.hram.androsaur.face.Expression
 import dev.hram.androsaur.face.Reflexes
 import kotlinx.coroutines.Dispatchers
@@ -85,7 +89,10 @@ private fun Screen(brain: Brain, dim: (Boolean) -> Unit, background: (() -> Unit
     LaunchedEffect(dimmed) { dim(dimmed) }
     Box(Modifier.fillMaxSize().background(Color.Black).clickable { brain.touch(); panel = !panel }) {
         Column(Modifier.fillMaxSize().safeDrawingPadding()) {
-            Box(Modifier.weight(if (panel) 0.5f else 1f).fillMaxWidth()) { Face(brain, now) }
+            Column(Modifier.weight(if (panel) 0.5f else 1f).fillMaxWidth()) {
+                Clock(now, compact = panel)
+                Box(Modifier.weight(1f).fillMaxWidth()) { Face(brain, now) }
+            }
             if (panel) Panel(brain, background, Modifier.weight(0.5f))
         }
     }
@@ -143,6 +150,30 @@ private fun Face(brain: Brain, now: Long) {
         "note" -> Caption("Играет записка", null, Modifier.align(Alignment.BottomCenter))
         else -> if (alpha > 0.01f) Text(shown, color = Color.White.copy(alpha = alpha), fontSize = 34.sp, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp))
     }
+    }
+}
+
+private val TIME = DateTimeFormatter.ofPattern("HH:mm")
+private val DATE = DateTimeFormatter.ofPattern("EEEE, d MMMM", Locale.forLanguageTag("ru"))
+
+/**
+ * The time and the date above the face («14:35», «суббота, 25 октября»), in the phone's time zone. It takes its own strip, so the
+ * face below shrinks instead of overlapping it, and moves with the face to keep the always-on screen from burning in.
+ * [now] is the screen's tick (it only makes the clock redraw); the time itself is the wall clock.
+ */
+@Composable
+private fun Clock(now: Long, compact: Boolean) {
+    val moment = Instant.now().atZone(ZoneId.systemDefault())
+    val (dx, dy) = Reflexes.drift(now)
+    val driftX by animateFloatAsState(dx.toFloat(), tween(4000), label = "clock dx")
+    val driftY by animateFloatAsState(dy.toFloat(), tween(4000), label = "clock dy")
+    Column(
+        Modifier.fillMaxWidth().padding(top = if (compact) 6.dp else 18.dp)
+            .offset { androidx.compose.ui.unit.IntOffset((driftX * 14.dp.toPx()).toInt(), (driftY * 6.dp.toPx()).toInt()) },
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(moment.format(TIME), color = Color.White.copy(alpha = 0.8f), fontSize = if (compact) 30.sp else 56.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Light)
+        if (!compact) Text(moment.format(DATE), color = Color.White.copy(alpha = 0.55f), fontSize = 20.sp)
     }
 }
 
