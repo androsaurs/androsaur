@@ -38,6 +38,8 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 import dev.hram.androsaur.face.Expression
 import dev.hram.androsaur.face.Reflexes
+import dev.hram.androsaur.weather.WeatherReading
+import dev.hram.androsaur.weather.WeatherText
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -57,6 +59,8 @@ class MainActivity : ComponentActivity() {
         }
         brain = Brain(applicationContext)
         takeHub(intent)
+        // Where the phone is, coarsely, for the weather; asked once. Refused, the weather comes only for a place set in the hub.
+        if (!brain.weatherSource.hasLocationPermission() && savedInstanceState == null) requestPermissions(arrayOf(android.Manifest.permission.ACCESS_COARSE_LOCATION), 1)
         lifecycleScope.launch { repeatOnLifecycle(Lifecycle.State.STARTED) { withContext(Dispatchers.IO) { brain.run() } } }
         setContent { MaterialTheme(colorScheme = darkColorScheme(primary = Color(0xff63e6a4))) { Screen(brain, ::dim) { work -> lifecycleScope.launch(Dispatchers.IO) { work() } } } }
     }
@@ -90,7 +94,7 @@ private fun Screen(brain: Brain, dim: (Boolean) -> Unit, background: (() -> Unit
     Box(Modifier.fillMaxSize().background(Color.Black).clickable { brain.touch(); panel = !panel }) {
         Column(Modifier.fillMaxSize().safeDrawingPadding()) {
             Column(Modifier.weight(if (panel) 0.5f else 1f).fillMaxWidth()) {
-                Clock(now, compact = panel)
+                Clock(now, compact = panel, weather = brain.weather)
                 Box(Modifier.weight(1f).fillMaxWidth()) { Face(brain, now) }
             }
             if (panel) Panel(brain, background, Modifier.weight(0.5f))
@@ -162,7 +166,7 @@ private val DATE = DateTimeFormatter.ofPattern("EEEE, d MMMM", Locale.forLanguag
  * [now] is the screen's tick (it only makes the clock redraw); the time itself is the wall clock.
  */
 @Composable
-private fun Clock(now: Long, compact: Boolean) {
+private fun Clock(now: Long, compact: Boolean, weather: WeatherReading?) {
     val moment = Instant.now().atZone(ZoneId.systemDefault())
     val (dx, dy) = Reflexes.drift(now)
     val driftX by animateFloatAsState(dx.toFloat(), tween(4000), label = "clock dx")
@@ -174,6 +178,7 @@ private fun Clock(now: Long, compact: Boolean) {
     ) {
         Text(moment.format(TIME), color = Color.White.copy(alpha = 0.8f), fontSize = if (compact) 30.sp else 56.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Light)
         if (!compact) Text(moment.format(DATE), color = Color.White.copy(alpha = 0.55f), fontSize = 20.sp)
+        if (!compact && weather != null) Text(WeatherText.line(weather, System.currentTimeMillis()), color = Color.White.copy(alpha = 0.55f), fontSize = 20.sp)
     }
 }
 

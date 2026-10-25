@@ -3,6 +3,8 @@
     <uses-permission android:name="dev.hram.androsaur.audio.permission.CONTROL" />
     <uses-permission android:name="dev.hram.androsaur.camera.permission.CONTROL" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Where the phone is, coarsely, for the weather; without it the weather comes only for a place set in the hub. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
     <queries>
         <package android:name="dev.hram.androsaur.audio" />

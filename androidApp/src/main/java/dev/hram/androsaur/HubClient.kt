@@ -57,7 +57,11 @@ class HubClient(context: Context, private val prefs: SharedPreferences) {
      * version of the people of the house ([peopleRev]; newer than [peopleRev] here means load them) and the ids of the people
      * whose sets the hub asks for ([upload]).
      */
-    class Reply(val config: JSONObject?, val commands: List<Command>, val peopleRev: Int = 0, val upload: List<String> = emptyList())
+    class Reply(
+        val config: JSONObject?, val commands: List<Command>, val peopleRev: Int = 0, val upload: List<String> = emptyList(),
+        /** The place of the weather set in the hub (null — none, the phone uses its own) and the hub's weather for it. */
+        val weatherPlace: JSONObject? = null, val weather: JSONObject? = null,
+    )
 
     /** Whom the camera knows, for the hub: [people] are objects with id, name, samples and digest (no sets); [faceModel] is the camera's face model. */
     class People(val people: JSONArray, val faceModel: String)
@@ -98,9 +102,11 @@ class HubClient(context: Context, private val prefs: SharedPreferences) {
         val peopleRev = body.optInt("peopleRev", 0)
         // Only the settings are kept, the commands are not: they come again until this phone reports them done.
         val config = JSONObject().put("rev", body.optInt("rev", 0)).put("values", body.optJSONObject("values") ?: JSONObject())
-        if (config.toString() == stored().toString()) return Result.success(Reply(null, commands, peopleRev, upload))
+        val place = body.optJSONObject("weatherPlace")
+        val weather = body.optJSONObject("weather")
+        if (config.toString() == stored().toString()) return Result.success(Reply(null, commands, peopleRev, upload, place, weather))
         prefs.edit().putString(KEY_CONFIG, config.toString()).apply()
-        return Result.success(Reply(config, commands, peopleRev, upload))
+        return Result.success(Reply(config, commands, peopleRev, upload, place, weather))
     }
 
     /** Hands the hub the sets of the people it asked for (the camera's export, filtered). The sets are never logged. */

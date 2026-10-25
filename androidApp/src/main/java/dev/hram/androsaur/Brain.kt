@@ -11,6 +11,8 @@ import dev.hram.androsaur.delivery.WaitingNote
 import dev.hram.androsaur.face.Reflexes
 import dev.hram.androsaur.hub.HubSettings
 import dev.hram.androsaur.hub.Rename
+import dev.hram.androsaur.weather.WeatherChoice
+import dev.hram.androsaur.weather.WeatherReading
 import org.json.JSONArray
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -29,6 +31,9 @@ class Brain(context: Context) {
     private val cameraClient = ModuleClient(context, "camera", "Камера", "dev.hram.androsaur.camera", "CameraService")
     private val prefs = context.getSharedPreferences("brain", Context.MODE_PRIVATE)
     val hub = HubClient(context, prefs)
+    val weatherSource = WeatherSource(context, prefs)
+    /** The weather to show under the clock, or null when there is none (no place known, nothing fetched, or too old). */
+    var weather by mutableStateOf<WeatherReading?>(null); private set
 
     var audio by mutableStateOf(ModuleUi("Звук")); private set
     var camera by mutableStateOf(ModuleUi("Камера")); private set
@@ -105,6 +110,7 @@ class Brain(context: Context) {
         launch { deliverNotes() }
         launch { shareContext() }
         launch { syncHub() }
+        launch { followWeather() }
         loop()
     }
 
@@ -140,6 +146,7 @@ class Brain(context: Context) {
             }
             hubState = "Хаб: на связи (${hub.url})"
             reply.config?.let { dimAfterMs = applyConfig(it) }
+            weatherSource.fromHub(reply.weatherPlace, reply.weather)
             done = reply.commands.map { HubClient.Done(it.id, execute(it)) }
             if (reply.upload.isNotEmpty()) uploadPeople(reply.upload)
             if (reply.peopleRev != hub.peopleRev) loadHousePeople()
@@ -248,6 +255,23 @@ class Brain(context: Context) {
             val toId = if (n.isNull("toId")) Delivery.idFor(n.optString("to"), byId) else null
             val fromId = if (n.isNull("fromId")) n.optString("from").takeIf { it.isNotEmpty() }?.let { Delivery.idFor(it, byId) } else null
             if (toId != null || fromId != null) audioClient.post("/notes/address", JSONObject().put("id", n.getString("id")).put("toId", toId ?: "").put("fromId", fromId ?: ""))
+        }
+    }
+
+    /**
+     * The weather, once a minute: the hub's while it is fresh; otherwise this phone asks MET Norway itself (no more than every half
+     * an hour) for the place set in the hub, or where the phone is; without the network the last weather stays, with its age.
+     */
+    private suspend fun followWeather() {
+        while (true) {
+            val now = System.currentTimeMillis()
+            weatherSource.refreshLocation(now)
+            val place = WeatherChoice.place(weatherSource.hubPlace, weatherSource.devicePlace)
+            if (WeatherChoice.fetchOwn(weatherSource.hubWeather, weatherSource.ownWeather, weatherSource.ownPlace, place, now)) {
+                weatherSource.fetch(place!!, now)
+            }
+            weather = WeatherChoice.show(weatherSource.hubWeather, weatherSource.ownWeather, System.currentTimeMillis())
+            delay(60_000)
         }
     }
 
