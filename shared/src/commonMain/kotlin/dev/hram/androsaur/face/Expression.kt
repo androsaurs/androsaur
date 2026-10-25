@@ -10,18 +10,24 @@ enum class Expression { NEUTRAL, ATTENTIVE, LISTENING, SLEEPY, SAD }
 object Reflexes {
     const val LISTENING_FOR_MS = 3_000L
     const val SLEEPY_AFTER_MS = 120_000L
+    const val DIM_AFTER_MS = 300_000L
+    const val DIM_LEVEL = 0.05f
 
     /**
      * The wake word wins for a few seconds, then a visible face makes the face attentive, a long silence makes it sleepy.
-     * While it is [watching] and nobody is there it is sad; when it is not watching (no camera) it has no reason to be.
+     * While it is [watching] and nobody is there it is sad until the screen dims, then it falls asleep; when it is not watching
+     * (no camera) it has no reason to be sad.
      */
     fun expression(now: Long, lastWakeAt: Long?, faceSeen: Boolean, lastActivityAt: Long, watching: Boolean = false): Expression = when {
         lastWakeAt != null && now - lastWakeAt in 0..LISTENING_FOR_MS -> Expression.LISTENING
         faceSeen -> Expression.ATTENTIVE
+        watching -> if (dimmed(now, lastActivityAt)) Expression.SLEEPY else Expression.SAD
         now - lastActivityAt > SLEEPY_AFTER_MS -> Expression.SLEEPY
-        watching -> Expression.SAD
         else -> Expression.NEUTRAL
     }
+
+    /** Whether the screen is dimmed to [DIM_LEVEL]: nothing happened (no face, voice or touch) for [DIM_AFTER_MS]. */
+    fun dimmed(now: Long, lastActivityAt: Long): Boolean = now - lastActivityAt > DIM_AFTER_MS
 
     const val FACE_GONE_MS = 4_000L
 

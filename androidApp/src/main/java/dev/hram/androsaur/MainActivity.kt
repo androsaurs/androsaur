@@ -51,16 +51,24 @@ class MainActivity : ComponentActivity() {
         }
         brain = Brain(applicationContext)
         lifecycleScope.launch { repeatOnLifecycle(Lifecycle.State.STARTED) { withContext(Dispatchers.IO) { brain.run() } } }
-        setContent { MaterialTheme(colorScheme = darkColorScheme(primary = Color(0xff63e6a4))) { Screen(brain) { work -> lifecycleScope.launch(Dispatchers.IO) { work() } } } }
+        setContent { MaterialTheme(colorScheme = darkColorScheme(primary = Color(0xff63e6a4))) { Screen(brain, ::dim) { work -> lifecycleScope.launch(Dispatchers.IO) { work() } } } }
+    }
+
+    private fun dim(on: Boolean) {
+        window.attributes = window.attributes.apply {
+            screenBrightness = if (on) Reflexes.DIM_LEVEL else WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+        }
     }
 }
 
 @Composable
-private fun Screen(brain: Brain, background: (() -> Unit) -> Unit) {
+private fun Screen(brain: Brain, dim: (Boolean) -> Unit, background: (() -> Unit) -> Unit) {
     // Only the face by default; a touch shows the panel with the modules and the buttons (for looking and for the odd manual start).
     var panel by remember { mutableStateOf(false) }
     var now by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
     LaunchedEffect(Unit) { while (true) { now = SystemClock.elapsedRealtime(); delay(100) } }
+    val dimmed = Reflexes.dimmed(now, brain.lastActivityAt)
+    LaunchedEffect(dimmed) { dim(dimmed) }
     Box(Modifier.fillMaxSize().background(Color.Black).clickable { brain.touch(); panel = !panel }) {
         Column(Modifier.fillMaxSize().safeDrawingPadding()) {
             Box(Modifier.weight(if (panel) 0.5f else 1f).fillMaxWidth()) { Face(brain, now) }

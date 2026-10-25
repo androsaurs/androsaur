@@ -33,7 +33,19 @@ class ReflexesTest {
         assertEquals(Expression.SAD, Reflexes.expression(5_000, null, faceSeen = false, lastActivityAt = 0, watching = true))
         assertEquals(Expression.NEUTRAL, Reflexes.expression(5_000, null, faceSeen = false, lastActivityAt = 0, watching = false))
         assertEquals(Expression.ATTENTIVE, Reflexes.expression(5_000, null, faceSeen = true, lastActivityAt = 0, watching = true))
-        assertEquals(Expression.SLEEPY, Reflexes.expression(200_000, null, faceSeen = false, lastActivityAt = 0, watching = true))
+        assertEquals(Expression.SAD, Reflexes.expression(200_000, null, faceSeen = false, lastActivityAt = 0, watching = true))
+    }
+
+    @Test fun longLonelinessDimsTheScreenAndPutsItToSleep() {
+        assertFalse(Reflexes.dimmed(Reflexes.DIM_AFTER_MS, lastActivityAt = 0))
+        assertTrue(Reflexes.dimmed(Reflexes.DIM_AFTER_MS + 1, lastActivityAt = 0))
+        assertEquals(Expression.SLEEPY, Reflexes.expression(Reflexes.DIM_AFTER_MS + 1, null, faceSeen = false, lastActivityAt = 0, watching = true))
+    }
+
+    @Test fun aPersonBringsTheBrightnessBack() {
+        val now = Reflexes.DIM_AFTER_MS * 2
+        assertFalse(Reflexes.dimmed(now, lastActivityAt = now - 100))
+        assertEquals(Expression.ATTENTIVE, Reflexes.expression(now, null, faceSeen = true, lastActivityAt = now - 100, watching = true))
     }
 
     @Test fun aShortGapInDetectionIsNotADeparture() {
