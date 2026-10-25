@@ -11,6 +11,7 @@ import dev.hram.androsaur.delivery.WaitingNote
 import dev.hram.androsaur.face.Reflexes
 import dev.hram.androsaur.hub.HubSettings
 import dev.hram.androsaur.hub.Rename
+import dev.hram.androsaur.weather.Greeting
 import dev.hram.androsaur.weather.WeatherChoice
 import dev.hram.androsaur.weather.WeatherReading
 import org.json.JSONArray
@@ -43,6 +44,8 @@ class Brain(context: Context) {
     var hubState by mutableStateOf(""); private set
     /** After how long without anybody the screen dims; the hub can change it, the last value received is used without the hub. */
     @Volatile var dimAfterMs = applyConfig(hub.stored()); private set
+    /** Whether to greet a person at the first meeting of the day (a hub setting, on by default). */
+    @Volatile private var greetingOn = greetingFrom(hub.stored())
     /** Face centre in the unmirrored camera picture (fractions 0..1), or null when nobody is seen. */
     @Volatile var face: Pair<Double, Double>? = null; private set
     @Volatile var lastWakeAt: Long? = null; private set
@@ -145,7 +148,7 @@ class Brain(context: Context) {
                 delay(HUB_EVERY_MS); continue
             }
             hubState = "Хаб: на связи (${hub.url})"
-            reply.config?.let { dimAfterMs = applyConfig(it) }
+            reply.config?.let { dimAfterMs = applyConfig(it); greetingOn = greetingFrom(it) }
             weatherSource.fromHub(reply.weatherPlace, reply.weather)
             done = reply.commands.map { HubClient.Done(it.id, execute(it)) }
             if (reply.upload.isNotEmpty()) uploadPeople(reply.upload)
@@ -276,6 +279,37 @@ class Brain(context: Context) {
     }
 
     /** The dimming timeout from the settings the hub set (or the default when it set none). */
+    private fun greetingFrom(config: JSONObject): Boolean =
+        HubSettings.GREETING.resolve(hub.value(config, HubSettings.GREETING.module, HubSettings.GREETING.key)) == 1L
+
+    /**
+     * The greeting at the first meeting of the day with a recognised person: «Доброе утро, Папа. Плюс одиннадцать, облачно.
+     * К вечеру небольшой дождь, возьми зонт.» Once a day per permanent id (kept in the preferences, so a restart does not greet
+     * again); waits until it has been said, so the notes come after it. Returns whether it greeted.
+     */
+    private suspend fun greet(personId: String, name: String): Boolean {
+        val zone = java.time.ZoneId.systemDefault()
+        val now = java.time.ZonedDateTime.now(zone)
+        val today = now.toLocalDate().toString()
+        val greeted = runCatching { JSONObject(prefs.getString("greeted", "{}") ?: "{}") }.getOrDefault(JSONObject())
+        if (!greetingOn || !Greeting.due(greeted.optString(personId).ifEmpty { null }, today)) return false
+        val shown = weather
+        val later = shown?.laterTimeMs?.let { at ->
+            val time = java.time.Instant.ofEpochMilli(at).atZone(zone)
+            Greeting.whenLater(time.hour, (at - System.currentTimeMillis()) / 3_600_000.0, time.toLocalDate() != now.toLocalDate())
+        }
+        val text = Greeting.text(name, now.hour, shown, System.currentTimeMillis(), later)
+        val reply = audioClient.post("/speak", JSONObject().put("text", text))
+        if (reply == null || reply.first != 200) return false
+        // Marked as soon as it started: a greeting cut short is not repeated all day.
+        prefs.edit().putString("greeted", greeted.put(personId, today).toString()).apply()
+        note = "Приветствие: $name"
+        delay(500)
+        val until = SystemClock.elapsedRealtime() + 20_000
+        while (speaking && SystemClock.elapsedRealtime() < until) delay(250)
+        return true
+    }
+
     private fun applyConfig(config: JSONObject): Long =
         HubSettings.DIM_AFTER.resolve(hub.value(config, HubSettings.DIM_AFTER.module, HubSettings.DIM_AFTER.key)) * 1000
 
@@ -327,7 +361,9 @@ class Brain(context: Context) {
             val name = badge.takeIf { it.isNotEmpty() && it != UNKNOWN && Reflexes.badgeVisible(now, recognizedAt, lastFaceAt) }
             if (name == null) { if (lastName.isNotEmpty() && !Reflexes.present(now, lastFaceAt)) { gate.left(lastName); lastName = "" }; continue }
             lastName = name
-            if (!audio.running || speaking || !gate.shouldCheck(name, now)) continue
+            if (!audio.running || speaking || mode.isNotEmpty()) continue
+            badgeId?.let { id -> if (greet(id, name)) lastActivityAt = SystemClock.elapsedRealtime() }
+            if (!gate.shouldCheck(name, now)) continue
             val list = audioClient.get("/notes?pending=1")?.second?.optJSONArray("notes") ?: continue
             val waiting = List(list.length()) { list.getJSONObject(it).let { n ->
                 WaitingNote(n.getString("id"), n.getString("to"), n.getLong("createdAtMs"), if (n.isNull("toId")) null else n.optString("toId").ifEmpty { null })

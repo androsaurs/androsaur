@@ -102,15 +102,25 @@ class WeatherSource(private val context: Context, private val prefs: SharedPrefe
             val now = first.getJSONObject("data")
             val details = now.getJSONObject("instant").getJSONObject("details")
             val next = now.optJSONObject("next_1_hours") ?: now.optJSONObject("next_6_hours")
+            val symbol = next?.optJSONObject("summary")?.optString("symbol_code").orEmpty()
+            // The nearest hour with rain, sleet or snow in the next 12, when it is dry now.
+            var later: Pair<String, Long>? = null
+            if (!isPrecipitation(symbol)) for (i in 1 until minOf(12, series.length())) {
+                val point = series.getJSONObject(i)
+                val code = point.getJSONObject("data").optJSONObject("next_1_hours")?.optJSONObject("summary")?.optString("symbol_code").orEmpty()
+                if (isPrecipitation(code)) { later = code to Instant.parse(point.getString("time")).toEpochMilli(); break }
+            }
             val temps = (0 until minOf(12, series.length())).mapNotNull { i ->
                 series.getJSONObject(i).getJSONObject("data").getJSONObject("instant").getJSONObject("details").let { d -> if (d.has("air_temperature")) d.getDouble("air_temperature") else null }
             }
             return WeatherReading(
-                place, details.getDouble("air_temperature"), next?.optJSONObject("summary")?.optString("symbol_code").orEmpty(),
+                place, details.getDouble("air_temperature"), symbol,
                 if (details.has("wind_speed")) details.getDouble("wind_speed") else null, temps.minOrNull(), temps.maxOrNull(),
-                Instant.parse(first.getString("time")).toEpochMilli(), nowMs,
+                Instant.parse(first.getString("time")).toEpochMilli(), nowMs, later?.first, later?.second,
             )
         }
+
+        private fun isPrecipitation(symbol: String) = listOf("rain", "sleet", "snow").any { it in symbol }
 
         fun readingOf(text: String): WeatherReading? = runCatching { readingOf(JSONObject(text)) }.getOrNull()
 
@@ -119,11 +129,13 @@ class WeatherSource(private val context: Context, private val prefs: SharedPrefe
             o.optString("place"), o.getDouble("temperature"), o.optString("symbol"),
             o.optDouble("wind").takeUnless { it.isNaN() }, o.optDouble("min").takeUnless { it.isNaN() }, o.optDouble("max").takeUnless { it.isNaN() },
             o.optLong("timeMs"), o.getLong("fetchedAtMs"),
+            o.optString("laterSymbol").takeIf { it.isNotEmpty() && it != "null" }, o.optLong("laterTimeMs").takeIf { it > 0 },
         )
 
         fun readingJson(r: WeatherReading): JSONObject = JSONObject().put("place", r.place).put("temperature", r.temperature).put("symbol", r.symbol)
             .put("wind", r.wind ?: JSONObject.NULL).put("min", r.min ?: JSONObject.NULL).put("max", r.max ?: JSONObject.NULL)
             .put("timeMs", r.timeMs).put("fetchedAtMs", r.fetchedAtMs)
+            .put("laterSymbol", r.laterSymbol ?: JSONObject.NULL).put("laterTimeMs", r.laterTimeMs ?: JSONObject.NULL)
 
         fun placeOf(text: String): Place? = runCatching { JSONObject(text).let { Place(it.optString("name"), it.getDouble("latitude"), it.getDouble("longitude")) } }.getOrNull()
         fun placeJson(p: Place): JSONObject = JSONObject().put("name", p.name).put("latitude", p.latitude).put("longitude", p.longitude)

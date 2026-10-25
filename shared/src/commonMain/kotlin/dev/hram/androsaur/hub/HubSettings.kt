@@ -30,5 +30,16 @@ object HubSettings {
         default = Reflexes.DIM_AFTER_MS / 1000,
     )
 
-    val all = listOf(DIM_AFTER)
+    val GREETING = IntSetting(
+        module = "androsaur",
+        key = "greeting",
+        title = "Приветствие при первой встрече за день",
+        description = "1 — Петя здоровается с узнанным человеком, когда видит его впервые за день, и говорит погоду; 0 — молчит.",
+        unit = "",
+        min = 0,
+        max = 1,
+        default = 1,
+    )
+
+    val all = listOf(DIM_AFTER, GREETING)
 }

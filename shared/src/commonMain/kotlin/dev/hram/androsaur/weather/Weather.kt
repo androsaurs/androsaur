@@ -22,6 +22,9 @@ data class WeatherReading(
     val max: Double?,
     val timeMs: Long,
     val fetchedAtMs: Long,
+    /** The nearest precipitation in the next 12 hours when there is none now: MET's code and its hour, or null. */
+    val laterSymbol: String? = null,
+    val laterTimeMs: Long? = null,
 )
 
 /**
