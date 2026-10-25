@@ -38,6 +38,7 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 import dev.hram.androsaur.face.Expression
 import dev.hram.androsaur.face.Reflexes
+import dev.hram.androsaur.commands.Answers
 import dev.hram.androsaur.weather.WeatherReading
 import dev.hram.androsaur.weather.WeatherText
 import kotlinx.coroutines.Dispatchers
@@ -94,7 +95,7 @@ private fun Screen(brain: Brain, dim: (Boolean) -> Unit, background: (() -> Unit
     Box(Modifier.fillMaxSize().background(Color.Black).clickable { brain.touch(); panel = !panel }) {
         Column(Modifier.fillMaxSize().safeDrawingPadding()) {
             Column(Modifier.weight(if (panel) 0.5f else 1f).fillMaxWidth()) {
-                Clock(now, compact = panel, weather = brain.weather)
+                Clock(now, compact = panel, weather = brain.weather, timerEndsAt = brain.timerEndsAt, ringing = brain.ringing)
                 Box(Modifier.weight(1f).fillMaxWidth()) { Face(brain, now) }
             }
             if (panel) Panel(brain, background, Modifier.weight(0.5f))
@@ -166,7 +167,7 @@ private val DATE = DateTimeFormatter.ofPattern("EEEE, d MMMM", Locale.forLanguag
  * [now] is the screen's tick (it only makes the clock redraw); the time itself is the wall clock.
  */
 @Composable
-private fun Clock(now: Long, compact: Boolean, weather: WeatherReading?) {
+private fun Clock(now: Long, compact: Boolean, weather: WeatherReading?, timerEndsAt: Long?, ringing: Boolean) {
     val moment = Instant.now().atZone(ZoneId.systemDefault())
     val (dx, dy) = Reflexes.drift(now)
     val driftX by animateFloatAsState(dx.toFloat(), tween(4000), label = "clock dx")
@@ -179,6 +180,15 @@ private fun Clock(now: Long, compact: Boolean, weather: WeatherReading?) {
         Text(moment.format(TIME), color = Color.White.copy(alpha = 0.8f), fontSize = if (compact) 30.sp else 56.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Light)
         if (!compact) Text(moment.format(DATE), color = Color.White.copy(alpha = 0.55f), fontSize = 20.sp)
         if (!compact && weather != null) Text(WeatherText.line(weather, System.currentTimeMillis()), color = Color.White.copy(alpha = 0.55f), fontSize = 20.sp)
+        // The timer: the countdown while it runs, «Время вышло» while the bell rings (a touch on the screen silences it).
+        when {
+            ringing -> {
+                Text("⏰ Время вышло", color = Color(0xffffb454), fontSize = if (compact) 18.sp else 30.sp)
+                if (!compact) Text("коснитесь экрана или скажите «стоп»", color = Color(0xffffb454).copy(alpha = 0.8f), fontSize = 18.sp,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(horizontal = 16.dp))
+            }
+            timerEndsAt != null -> Text("Таймер ${Answers.countdown(((timerEndsAt - System.currentTimeMillis() + 999) / 1000).toInt())}", color = Color(0xff63e6a4), fontSize = if (compact) 18.sp else 30.sp)
+        }
     }
 }
 

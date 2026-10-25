@@ -11,6 +11,7 @@ import dev.hram.androsaur.delivery.WaitingNote
 import dev.hram.androsaur.face.Reflexes
 import dev.hram.androsaur.hub.HubSettings
 import dev.hram.androsaur.hub.Rename
+import dev.hram.androsaur.commands.Answers
 import dev.hram.androsaur.weather.Greeting
 import dev.hram.androsaur.weather.WeatherChoice
 import dev.hram.androsaur.weather.WeatherReading
@@ -71,7 +72,21 @@ class Brain(context: Context) {
     /** The run of the audio service the event numbers belong to; a restarted service numbers its events from 1 again. */
     private var audioBoot = ""
 
-    fun touch() { lastActivityAt = SystemClock.elapsedRealtime() }
+    /** A touch on the face: the person is here; a ringing timer is silenced (done on the timer's thread, not the screen's). */
+    fun touch() { lastActivityAt = SystemClock.elapsedRealtime(); if (ringing) stopRingRequested = true }
+
+    /** When the timer rings, wall clock ms; null when none is set. Kept in the preferences, so a restart does not lose it. */
+    var timerEndsAt by mutableStateOf(prefs.getLong("timer_ends_at", 0L).takeIf { it > 0 }); private set
+    /** The timer's bell is ringing (the audio module plays it). */
+    var ringing by mutableStateOf(false); private set
+    @Volatile private var stopRingRequested = false
+    /** Short commands heard by the audio module, waiting to be answered on the timer's thread. */
+    private val commands = java.util.concurrent.ConcurrentLinkedQueue<Pair<String, JSONObject>>()
+
+    private fun setTimer(endsAt: Long?) {
+        timerEndsAt = endsAt
+        prefs.edit().putLong("timer_ends_at", endsAt ?: 0L).apply()
+    }
 
     /** Starts both services from this visible app and tells which one refused. */
     fun startModules() {
@@ -114,6 +129,7 @@ class Brain(context: Context) {
         launch { shareContext() }
         launch { syncHub() }
         launch { followWeather() }
+        launch { followCommands() }
         loop()
     }
 
@@ -265,6 +281,51 @@ class Brain(context: Context) {
      * The weather, once a minute: the hub's while it is fresh; otherwise this phone asks MET Norway itself (no more than every half
      * an hour) for the place set in the hub, or where the phone is; without the network the last weather stays, with its age.
      */
+    /**
+     * Answers the short voice commands and keeps the timer: the time, the weather today and tomorrow, a timer that rings over the
+     * face («Время вышло.» and a bell until «стоп», the wake word or a touch), how much is left, «стоп». All of it is local to
+     * this phone; the weather is whatever [weather] holds (the hub's or the phone's own).
+     */
+    private suspend fun followCommands() {
+        while (true) {
+            delay(250)
+            if (stopRingRequested) { stopRingRequested = false; audioClient.post("/ring/stop", JSONObject()) }
+            val ends = timerEndsAt
+            if (ends != null && System.currentTimeMillis() >= ends) {
+                setTimer(null)
+                // A timer that ran out long ago (the phone was off) is no use ringing now.
+                if (System.currentTimeMillis() - ends > 10 * 60_000L) continue
+                lastActivityAt = SystemClock.elapsedRealtime()
+                say(Answers.TIMER_UP)
+                delay(1800)
+                audioClient.post("/ring", JSONObject().put("seconds", 60))
+            }
+            val (intent, data) = commands.poll() ?: continue
+            lastActivityAt = SystemClock.elapsedRealtime()
+            val now = java.time.ZonedDateTime.now()
+            when (intent) {
+                "time" -> say(Answers.time(now.hour, now.minute))
+                "weather" -> say(Answers.weatherNow(weather, weather?.laterTimeMs?.let { at ->
+                    val time = java.time.Instant.ofEpochMilli(at).atZone(now.zone)
+                    Greeting.whenLater(time.hour, (at - System.currentTimeMillis()) / 3_600_000.0, time.toLocalDate() != now.toLocalDate())
+                }))
+                "weather_tomorrow" -> say(Answers.weatherTomorrow(weather))
+                "timer" -> data.optString("seconds").toIntOrNull()?.let { seconds ->
+                    setTimer(System.currentTimeMillis() + seconds * 1000L)
+                    say(Answers.timerSet(seconds))
+                }
+                "timer_left" -> say(Answers.timerLeft(timerEndsAt?.let { ((it - System.currentTimeMillis()) / 1000).toInt() }))
+                // «Стоп» that silenced the bell needs no words; «стоп» while the timer only counts down switches it off.
+                "stop" -> if (data.optString("wasRinging") != "true" && timerEndsAt != null) { setTimer(null); say(Answers.TIMER_OFF) }
+            }
+        }
+    }
+
+    private fun say(text: String) {
+        val reply = audioClient.post("/speak", JSONObject().put("text", text))
+        if (reply == null || reply.first != 200) note = "Не сказал: ${reply?.second?.optString("error") ?: "звук не отвечает"}"
+    }
+
     private suspend fun followWeather() {
         while (true) {
             val now = System.currentTimeMillis()
@@ -479,6 +540,11 @@ class Brain(context: Context) {
         for (i in 0 until list.length()) {
             val e = list.getJSONObject(i)
             lastEventId = maxOf(lastEventId, e.optLong("id"))
+            when (e.optString("type")) {
+                "command" -> e.optJSONObject("data")?.let { d -> commands.add(d.optString("intent") to d) }
+                "ring_started" -> { ringing = true; lastActivityAt = SystemClock.elapsedRealtime() }
+                "ring_stopped" -> ringing = false
+            }
             if (e.optString("type") == "wake_word") {
                 lastWakeAt = SystemClock.elapsedRealtime(); lastActivityAt = lastWakeAt!!
                 wakeText = e.optJSONObject("data")?.optString("heard").orEmpty()

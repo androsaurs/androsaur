@@ -25,6 +25,10 @@ data class WeatherReading(
     /** The nearest precipitation in the next 12 hours when there is none now: MET's code and its hour, or null. */
     val laterSymbol: String? = null,
     val laterTimeMs: Long? = null,
+    /** Tomorrow in local time: the lowest and highest temperature and what is expected in the day. */
+    val tomorrowMin: Double? = null,
+    val tomorrowMax: Double? = null,
+    val tomorrowSymbol: String? = null,
 )
 
 /**

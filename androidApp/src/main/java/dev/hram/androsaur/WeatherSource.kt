@@ -110,6 +110,21 @@ class WeatherSource(private val context: Context, private val prefs: SharedPrefe
                 val code = point.getJSONObject("data").optJSONObject("next_1_hours")?.optJSONObject("summary")?.optString("symbol_code").orEmpty()
                 if (isPrecipitation(code)) { later = code to Instant.parse(point.getString("time")).toEpochMilli(); break }
             }
+            // Tomorrow in local time: lowest and highest temperature, and the symbol of the point nearest to noon.
+            val zone = java.time.ZoneId.systemDefault()
+            val tomorrow = Instant.ofEpochMilli(nowMs).atZone(zone).toLocalDate().plusDays(1)
+            val tomorrowTemps = mutableListOf<Double>()
+            var noon: Pair<Double, String>? = null
+            for (i in 0 until series.length()) {
+                val point = series.getJSONObject(i)
+                val at = Instant.parse(point.getString("time")).atZone(zone)
+                if (at.toLocalDate() != tomorrow) continue
+                val d = point.getJSONObject("data")
+                d.getJSONObject("instant").getJSONObject("details").let { if (it.has("air_temperature")) tomorrowTemps += it.getDouble("air_temperature") }
+                val code = (d.optJSONObject("next_6_hours") ?: d.optJSONObject("next_1_hours"))?.optJSONObject("summary")?.optString("symbol_code").orEmpty()
+                val distance = kotlin.math.abs(at.hour + at.minute / 60.0 - 12)
+                if (code.isNotEmpty() && (noon == null || distance < noon.first)) noon = distance to code
+            }
             val temps = (0 until minOf(12, series.length())).mapNotNull { i ->
                 series.getJSONObject(i).getJSONObject("data").getJSONObject("instant").getJSONObject("details").let { d -> if (d.has("air_temperature")) d.getDouble("air_temperature") else null }
             }
@@ -117,6 +132,7 @@ class WeatherSource(private val context: Context, private val prefs: SharedPrefe
                 place, details.getDouble("air_temperature"), symbol,
                 if (details.has("wind_speed")) details.getDouble("wind_speed") else null, temps.minOrNull(), temps.maxOrNull(),
                 Instant.parse(first.getString("time")).toEpochMilli(), nowMs, later?.first, later?.second,
+                tomorrowTemps.minOrNull(), tomorrowTemps.maxOrNull(), noon?.second,
             )
         }
 
@@ -130,12 +146,16 @@ class WeatherSource(private val context: Context, private val prefs: SharedPrefe
             o.optDouble("wind").takeUnless { it.isNaN() }, o.optDouble("min").takeUnless { it.isNaN() }, o.optDouble("max").takeUnless { it.isNaN() },
             o.optLong("timeMs"), o.getLong("fetchedAtMs"),
             o.optString("laterSymbol").takeIf { it.isNotEmpty() && it != "null" }, o.optLong("laterTimeMs").takeIf { it > 0 },
+            o.optDouble("tomorrowMin").takeUnless { it.isNaN() }, o.optDouble("tomorrowMax").takeUnless { it.isNaN() },
+            o.optString("tomorrowSymbol").takeIf { it.isNotEmpty() && it != "null" },
         )
 
         fun readingJson(r: WeatherReading): JSONObject = JSONObject().put("place", r.place).put("temperature", r.temperature).put("symbol", r.symbol)
             .put("wind", r.wind ?: JSONObject.NULL).put("min", r.min ?: JSONObject.NULL).put("max", r.max ?: JSONObject.NULL)
             .put("timeMs", r.timeMs).put("fetchedAtMs", r.fetchedAtMs)
             .put("laterSymbol", r.laterSymbol ?: JSONObject.NULL).put("laterTimeMs", r.laterTimeMs ?: JSONObject.NULL)
+            .put("tomorrowMin", r.tomorrowMin ?: JSONObject.NULL).put("tomorrowMax", r.tomorrowMax ?: JSONObject.NULL)
+            .put("tomorrowSymbol", r.tomorrowSymbol ?: JSONObject.NULL)
 
         fun placeOf(text: String): Place? = runCatching { JSONObject(text).let { Place(it.optString("name"), it.getDouble("latitude"), it.getDouble("longitude")) } }.getOrNull()
         fun placeJson(p: Place): JSONObject = JSONObject().put("name", p.name).put("latitude", p.latitude).put("longitude", p.longitude)
