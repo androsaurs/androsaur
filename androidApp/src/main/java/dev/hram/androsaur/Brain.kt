@@ -9,6 +9,9 @@ import dev.hram.androsaur.delivery.Delivery
 import dev.hram.androsaur.delivery.DeliveryGate
 import dev.hram.androsaur.delivery.WaitingNote
 import dev.hram.androsaur.face.Reflexes
+import dev.hram.androsaur.hub.HubSettings
+import dev.hram.androsaur.hub.Rename
+import org.json.JSONArray
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -25,11 +28,16 @@ class Brain(context: Context) {
     private val audioClient = ModuleClient(context, "audio", "Звук", "dev.hram.androsaur.audio", "AudioService")
     private val cameraClient = ModuleClient(context, "camera", "Камера", "dev.hram.androsaur.camera", "CameraService")
     private val prefs = context.getSharedPreferences("brain", Context.MODE_PRIVATE)
+    val hub = HubClient(context, prefs)
 
     var audio by mutableStateOf(ModuleUi("Звук")); private set
     var camera by mutableStateOf(ModuleUi("Камера")); private set
     var tracking by mutableStateOf(false); private set
     var note by mutableStateOf<String?>(null); private set
+    /** How the link to the hub is doing, for the panel. */
+    var hubState by mutableStateOf(""); private set
+    /** After how long without anybody the screen dims; the hub can change it, the last value received is used without the hub. */
+    @Volatile var dimAfterMs = applyConfig(hub.stored()); private set
     /** Face centre in the unmirrored camera picture (fractions 0..1), or null when nobody is seen. */
     @Volatile var face: Pair<Double, Double>? = null; private set
     @Volatile var lastWakeAt: Long? = null; private set
@@ -38,6 +46,8 @@ class Brain(context: Context) {
     @Volatile var lastFaceAt: Long? = null; private set
     /** Who said the wake word: a name, or "Не узнаю" for a face the camera does not know; shown while [Reflexes.badgeVisible] holds. */
     @Volatile var badge: String = ""; private set
+    /** The camera's permanent id of the person in [badge] (a name changes, the id does not), or null. */
+    @Volatile private var badgeId: String? = null
     @Volatile var recognizedAt: Long? = null; private set
     /** Whether the audio module is speaking and how wide the mouth is (0..1), from its own loudness of the sound that plays. */
     @Volatile var speaking = false; private set
@@ -94,6 +104,7 @@ class Brain(context: Context) {
         launch { followMouth() }
         launch { deliverNotes() }
         launch { shareContext() }
+        launch { syncHub() }
         loop()
     }
 
@@ -110,6 +121,140 @@ class Brain(context: Context) {
         }
     }
 
+    /**
+     * Talks to the hub every half a minute: tells it whom the camera knows and how the last commands ended, takes the settings
+     * and the new commands, hands it the sets of faces it asks for and loads the people of the house when they changed (so a
+     * clean phone recognises the family without being taught). After a change it talks again at once, so the admin panel sees
+     * it applied without waiting a round. Without the hub (none set, or it does not answer) nothing changes and the results
+     * wait for the next contact.
+     */
+    private suspend fun syncHub() {
+        var done = emptyList<HubClient.Done>()
+        while (true) {
+            if (hub.url.isEmpty()) { hubState = "Хаб не задан"; delay(HUB_EVERY_MS); continue }
+            val result = hub.sync(cameraReport(), done)
+            val reply = result.getOrNull()
+            if (reply == null) {
+                hubState = "Хаб: ${result.exceptionOrNull()?.message} (${hub.url}), работаю на последних настройках"
+                delay(HUB_EVERY_MS); continue
+            }
+            hubState = "Хаб: на связи (${hub.url})"
+            reply.config?.let { dimAfterMs = applyConfig(it) }
+            done = reply.commands.map { HubClient.Done(it.id, execute(it)) }
+            if (reply.upload.isNotEmpty()) uploadPeople(reply.upload)
+            if (reply.peopleRev != hub.peopleRev) loadHousePeople()
+            if (reply.config == null && done.isEmpty()) delay(HUB_EVERY_MS)
+        }
+    }
+
+    /** Whom the camera knows for the hub: id, name, number of sets and their fingerprint (not the sets), and the face model. */
+    private fun cameraReport(): HubClient.People? {
+        if (!camera.running) return null
+        val reply = cameraClient.get("/people")?.second ?: return null
+        val model = reply.optJSONObject("model")?.optString("id").orEmpty().ifEmpty { return null }
+        val people = reply.optJSONArray("people") ?: return null
+        val list = JSONArray()
+        for (p in List(people.length()) { people.getJSONObject(it) }) {
+            if (p.optString("id").isEmpty()) continue
+            list.put(JSONObject().put("id", p.getString("id")).put("name", p.optString("name")).put("samples", p.optInt("samples")).put("digest", p.optString("digest").ifEmpty { JSONObject.NULL }))
+        }
+        return HubClient.People(list, model)
+    }
+
+    /** Hands the hub the sets of the people it asked for. They pass through memory only. */
+    private fun uploadPeople(ids: List<String>) {
+        val export = cameraClient.get("/people/export")?.second ?: return
+        val all = export.optJSONArray("people") ?: return
+        val wanted = JSONArray()
+        for (p in List(all.length()) { all.getJSONObject(it) }) if (p.optString("id") in ids) wanted.put(p)
+        val digests = cameraReport()?.people?.let { r -> List(r.length()) { r.getJSONObject(it) }.associate { it.getString("id") to it.opt("digest") } }.orEmpty()
+        for (i in 0 until wanted.length()) wanted.getJSONObject(i).put("digest", digests[wanted.getJSONObject(i).getString("id")] ?: JSONObject.NULL)
+        if (wanted.length() > 0 && !hub.upload(wanted, export.optString("model"))) note = "Хаб не принял наборы лиц"
+    }
+
+    /** Loads the people of the house into the camera: new people are added, known ones take the name and the sets they lack. */
+    private fun loadHousePeople() {
+        val house = hub.download() ?: return
+        val people = house.optJSONArray("people") ?: JSONArray()
+        val reply = cameraClient.post("/people/import", JSONObject().put("model", house.optString("faceModel")).put("people", people))
+        if (reply == null || reply.first != 200) { note = "Люди дома не загрузились: ${reply?.second?.optString("error") ?: "камера не ответила"}"; return }
+        val errors = reply.second.optJSONObject("errors")
+        if (errors != null && errors.length() > 0) note = "Люди дома: ${errors.length()} не загрузились (${errors.keys().asSequence().map { errors.getString(it) }.distinct().joinToString()})"
+        hub.peopleRev = house.optInt("rev", 0)
+        cameraPeople()?.let { sendPeople(it) }
+    }
+
+    /** The people the camera knows as (permanent id, name), not their faces; null when it does not answer. */
+    private fun cameraPeople(): List<Pair<String, String>>? {
+        if (!camera.running) return null
+        val people = cameraClient.get("/people")?.second?.optJSONArray("people") ?: return null
+        return List(people.length()) { people.getJSONObject(it) }.map { it.optString("id") to it.optString("name") }
+            .filter { it.first.isNotEmpty() && it.second.isNotEmpty() }
+    }
+
+    /** Does a command from the hub; returns null when it worked, or an error code for the admin panel. */
+    private fun execute(command: HubClient.Command): String? = when (command.kind) {
+        "rename_person" -> renamePerson(command.person, command.to)
+        "merge_person" -> command.into?.let { mergePerson(command.person, it, command.to) } ?: "unknown_command"
+        else -> "unknown_command"
+    }
+
+    /**
+     * Renames the person with the permanent id [personId] to [to]. Only the name changes: the camera keeps their faces and id, and
+     * notes are tied to the id, so whatever was left for them stays theirs. The audio module's recipients and the roles follow.
+     * Done twice (the report to the hub got lost) it still ends well.
+     */
+    private fun renamePerson(personId: String, to: String): String? {
+        val before = cameraPeople() ?: return "camera_unavailable"
+        val name = before.firstOrNull { it.first == personId }?.second
+        if (name == to) return null
+        if (name == null) return "unknown_person"
+        val reply = cameraClient.post("/people/rename", JSONObject().put("id", personId).put("to", to)) ?: return "camera_unavailable"
+        if (reply.first != 200) return reply.second.optString("error").ifEmpty { "http_${reply.first}" }
+        cameraPeople()?.let { sendPeople(it) }
+        prefs.edit().putString("aliases", JSONObject(Rename.aliases(aliases(), name, to)).toString()).apply()
+        if (badgeId == personId) badge = to
+        note = "Хаб: «$name» теперь «$to»"
+        return null
+    }
+
+    /**
+     * The person [from] taught on this phone (in another system) is the person [into] of the house, called [name]: the camera
+     * joins their sets or gives them the house's id, and their notes and recipient entry move to that id. Done twice it ends well.
+     */
+    private fun mergePerson(from: String, into: String, name: String): String? {
+        val reply = cameraClient.post("/people/merge", JSONObject().put("from", from).put("into", into).put("name", name)) ?: return "camera_unavailable"
+        if (reply.first != 200) return reply.second.optString("error").ifEmpty { "http_${reply.first}" }
+        val audioReply = audioClient.post("/people/merge", JSONObject().put("from", from).put("into", into))
+        if (audioReply == null || audioReply.first != 200) return "audio_unavailable"
+        if (badgeId == from) { badgeId = into; badge = name }
+        cameraPeople()?.let { sendPeople(it) }
+        note = "Хаб: «$name» объединён с человеком дома"
+        return null
+    }
+
+    /** Hands the camera's people (id, name) to the audio module, which keeps its recipients by id: a renamed person is updated in place. */
+    private fun sendPeople(people: List<Pair<String, String>>): Boolean =
+        audioClient.post("/recipients", JSONObject().put("addPeople", JSONArray(people.map { JSONObject().put("id", it.first).put("name", it.second) })))?.first == 200
+
+    /**
+     * Notes made before ids are tied once to the person whose current name they were left for (and to who left them), so that a
+     * later rename does not change whom they are for.
+     */
+    private fun addressOldNotes(people: List<Pair<String, String>>) {
+        val list = audioClient.get("/notes")?.second?.optJSONArray("notes") ?: return
+        val byId = people.toMap()
+        for (n in List(list.length()) { list.getJSONObject(it) }) {
+            val toId = if (n.isNull("toId")) Delivery.idFor(n.optString("to"), byId) else null
+            val fromId = if (n.isNull("fromId")) n.optString("from").takeIf { it.isNotEmpty() }?.let { Delivery.idFor(it, byId) } else null
+            if (toId != null || fromId != null) audioClient.post("/notes/address", JSONObject().put("id", n.getString("id")).put("toId", toId ?: "").put("fromId", fromId ?: ""))
+        }
+    }
+
+    /** The dimming timeout from the settings the hub set (or the default when it set none). */
+    private fun applyConfig(config: JSONObject): Long =
+        HubSettings.DIM_AFTER.resolve(hub.value(config, HubSettings.DIM_AFTER.module, HubSettings.DIM_AFTER.key)) * 1000
+
     private val gate = DeliveryGate()
 
     /**
@@ -119,6 +264,7 @@ class Brain(context: Context) {
      */
     private suspend fun shareContext() {
         var sent: String? = null
+        var sentId: String? = null
         var sentAt = 0L
         var peopleAt = 0L
         while (true) {
@@ -126,13 +272,13 @@ class Brain(context: Context) {
             if (!audio.running) { sent = null; continue }
             val now = SystemClock.elapsedRealtime()
             val name = badgeText(now).takeIf { it.isNotEmpty() && it != UNKNOWN } ?: ""
-            if (name != sent || now - sentAt > 5000) {
-                if (audioClient.post("/context", JSONObject().put("person", name))?.first == 200) { sent = name; sentAt = now }
+            val id = if (name.isEmpty()) "" else badgeId.orEmpty()
+            if (name != sent || id != sentId || now - sentAt > 5000) {
+                if (audioClient.post("/context", JSONObject().put("person", name).put("personId", id))?.first == 200) { sent = name; sentId = id; sentAt = now }
             }
             if (camera.running && now - peopleAt > 30_000) {
-                val people = cameraClient.get("/people")?.second?.optJSONArray("people") ?: continue
-                val names = org.json.JSONArray(List(people.length()) { people.getJSONObject(it).optString("name") }.filter { it.isNotEmpty() })
-                if (audioClient.post("/recipients", JSONObject().put("addNames", names))?.first == 200) peopleAt = now
+                val people = cameraPeople() ?: continue
+                if (sendPeople(people)) { addressOldNotes(people); peopleAt = now }
             }
         }
     }
@@ -144,7 +290,8 @@ class Brain(context: Context) {
     }.getOrDefault(emptyMap())
 
     /**
-     * Voice notes by face: when a person is recognised and notes wait for them (by name or by role), the audio module plays them,
+     * Voice notes by face: when a person is recognised and notes wait for them (by their id, or by name or role for a note
+     * without one), the audio module plays them,
      * one after another, each with «Тебе сообщение от …». If the person leaves or somebody else is recognised meanwhile, the note
      * is cut short and stays waiting (the audio module marks a note heard only when it played to the end).
      */
@@ -158,8 +305,10 @@ class Brain(context: Context) {
             lastName = name
             if (!audio.running || speaking || !gate.shouldCheck(name, now)) continue
             val list = audioClient.get("/notes?pending=1")?.second?.optJSONArray("notes") ?: continue
-            val waiting = List(list.length()) { list.getJSONObject(it).let { n -> WaitingNote(n.getString("id"), n.getString("to"), n.getLong("createdAtMs")) } }
-            val mine = Delivery.forPerson(waiting, name, aliases())
+            val waiting = List(list.length()) { list.getJSONObject(it).let { n ->
+                WaitingNote(n.getString("id"), n.getString("to"), n.getLong("createdAtMs"), if (n.isNull("toId")) null else n.optString("toId").ifEmpty { null })
+            } }
+            val mine = Delivery.forPerson(waiting, badgeId, name, aliases())
             if (mine.isEmpty()) { gate.checkedEmpty(name, now); continue }
             var finished = true
             for (item in mine) if (!play(item, name)) { finished = false; break }
@@ -286,7 +435,7 @@ class Brain(context: Context) {
     private fun watchArrival() {
         val now = SystemClock.elapsedRealtime()
         val here = Reflexes.present(now, lastFaceAt)
-        if (here && !wasPresent) { badge = ""; recognizedAt = null; nextIdentifyAt = 0L }
+        if (here && !wasPresent) { badge = ""; badgeId = null; recognizedAt = null; nextIdentifyAt = 0L }
         wasPresent = here
         if (here && identifyUntil == 0L && now >= nextIdentifyAt) startIdentify(if (recognizedAt != null && badge != UNKNOWN) RECHECK_MS else IDENTIFY_MS)
     }
@@ -307,12 +456,12 @@ class Brain(context: Context) {
         // Only a result made after the wake word counts, not one left from earlier.
         if (who != null && who.optLong("ageMs", Long.MAX_VALUE) <= now - identifySince + 200) {
             val name = if (who.isNull("name")) null else who.optString("name")
-            if (name != null) { badge = name; recognizedAt = now; identifyUntil = 0L; return }
+            if (name != null) { badge = name; badgeId = if (who.isNull("id")) null else who.optString("id").ifEmpty { null }; recognizedAt = now; identifyUntil = 0L; return }
             sawStranger = true
         }
         if (now > identifyUntil) {
             identifyUntil = 0L
-            if (sawStranger) { badge = UNKNOWN; recognizedAt = now }
+            if (sawStranger) { badge = UNKNOWN; badgeId = null; recognizedAt = now }
         }
     }
 
@@ -334,7 +483,7 @@ class Brain(context: Context) {
     fun badgeText(now: Long): String = if (Reflexes.badgeVisible(now, recognizedAt, lastFaceAt)) badge else ""
 
     private companion object { const val IDENTIFY_MS = 3500L; const val RETRY_IDENTIFY_MS = 6000L
-        const val RECHECK_MS = 2000L; const val RECHECK_EVERY_MS = 5000L; const val UNKNOWN = "Не узнаю" }
+        const val RECHECK_MS = 2000L; const val RECHECK_EVERY_MS = 5000L; const val UNKNOWN = "Не узнаю"; const val HUB_EVERY_MS = 30_000L }
 
-    fun expression(now: Long) = Reflexes.expression(now, lastWakeAt, Reflexes.present(now, lastFaceAt), lastActivityAt, watching = tracking)
+    fun expression(now: Long) = Reflexes.expression(now, lastWakeAt, Reflexes.present(now, lastFaceAt), lastActivityAt, watching = tracking, dimAfterMs = dimAfterMs)
 }

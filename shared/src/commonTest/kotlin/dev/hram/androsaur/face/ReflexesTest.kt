@@ -33,7 +33,7 @@ class ReflexesTest {
         assertEquals(Expression.SAD, Reflexes.expression(5_000, null, faceSeen = false, lastActivityAt = 0, watching = true))
         assertEquals(Expression.NEUTRAL, Reflexes.expression(5_000, null, faceSeen = false, lastActivityAt = 0, watching = false))
         assertEquals(Expression.ATTENTIVE, Reflexes.expression(5_000, null, faceSeen = true, lastActivityAt = 0, watching = true))
-        assertEquals(Expression.SAD, Reflexes.expression(200_000, null, faceSeen = false, lastActivityAt = 0, watching = true))
+        assertEquals(Expression.SAD, Reflexes.expression(20_000, null, faceSeen = false, lastActivityAt = 0, watching = true))
     }
 
     @Test fun longLonelinessDimsTheScreenAndPutsItToSleep() {

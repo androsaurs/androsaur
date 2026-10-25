@@ -1,7 +1,10 @@
 package dev.hram.androsaur.delivery
 
-/** A voice note that waits for somebody, as the audio module lists it. */
-data class WaitingNote(val id: String, val to: String, val createdAtMs: Long)
+/**
+ * A voice note that waits for somebody, as the audio module lists it: [toId] is the camera's permanent id of the person it is
+ * for (it stays theirs when they are renamed), null for a role («жена») or a note made before ids; [to] is the name it was left under.
+ */
+data class WaitingNote(val id: String, val to: String, val createdAtMs: Long, val toId: String? = null)
 
 object Delivery {
     /** The audio module compares recipients this way: lower case, ё as е, single spaces. */
@@ -16,11 +19,20 @@ object Delivery {
         return setOf(me) + aliases.filter { normalize(it.value) == me }.keys.map { normalize(it) }
     }
 
-    /** The notes for the person who is in front of the camera, oldest first. */
-    fun forPerson(waiting: List<WaitingNote>, name: String, aliases: Map<String, String>): List<WaitingNote> {
+    /**
+     * The notes for the person who is in front of the camera (permanent [personId], current [name]), oldest first. A note with an
+     * id is theirs only by the id, whatever name it was left under; a note without one (a role, or older than ids) goes by name.
+     */
+    fun forPerson(waiting: List<WaitingNote>, personId: String?, name: String, aliases: Map<String, String>): List<WaitingNote> {
         val mine = addressedTo(name, aliases)
-        return waiting.filter { normalize(it.to) in mine }.sortedBy { it.createdAtMs }
+        return waiting.filter { n -> if (n.toId != null) n.toId == personId else normalize(n.to) in mine }.sortedBy { it.createdAtMs }
     }
+
+    /**
+     * The id to give a note made before ids: the person whose current name is the one the note was left for, or null when no
+     * such person is known (a role, a stranger, or somebody already renamed).
+     */
+    fun idFor(to: String, people: Map<String, String>): String? = people.entries.firstOrNull { normalize(it.value) == normalize(to) }?.key
 }
 
 /**

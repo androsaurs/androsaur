@@ -1,6 +1,8 @@
 package dev.hram.androsaur
 
+import android.content.Intent
 import android.os.Bundle
+import android.util.Log
 import android.os.SystemClock
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -50,8 +52,20 @@ class MainActivity : ComponentActivity() {
             hide(WindowInsetsCompat.Type.systemBars())
         }
         brain = Brain(applicationContext)
+        takeHub(intent)
         lifecycleScope.launch { repeatOnLifecycle(Lifecycle.State.STARTED) { withContext(Dispatchers.IO) { brain.run() } } }
         setContent { MaterialTheme(colorScheme = darkColorScheme(primary = Color(0xff63e6a4))) { Screen(brain, ::dim) { work -> lifecycleScope.launch(Dispatchers.IO) { work() } } } }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        takeHub(intent)
+    }
+
+    /** The hub address handed from outside: `adb shell am start -n dev.hram.androsaur/.MainActivity --es hub http://…` (empty to forget). */
+    private fun takeHub(intent: Intent?) {
+        val url = intent?.getStringExtra("hub") ?: return
+        if (!brain.hub.setUrl(url)) Log.w("Androsaur", "hub address refused: not an http(s) address")
     }
 
     private fun dim(on: Boolean) {
@@ -67,7 +81,7 @@ private fun Screen(brain: Brain, dim: (Boolean) -> Unit, background: (() -> Unit
     var panel by remember { mutableStateOf(false) }
     var now by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
     LaunchedEffect(Unit) { while (true) { now = SystemClock.elapsedRealtime(); delay(100) } }
-    val dimmed = Reflexes.dimmed(now, brain.lastActivityAt)
+    val dimmed = Reflexes.dimmed(now, brain.lastActivityAt, brain.dimAfterMs)
     LaunchedEffect(dimmed) { dim(dimmed) }
     Box(Modifier.fillMaxSize().background(Color.Black).clickable { brain.touch(); panel = !panel }) {
         Column(Modifier.fillMaxSize().safeDrawingPadding()) {
@@ -145,6 +159,7 @@ private fun Panel(brain: Brain, background: (() -> Unit) -> Unit, modifier: Modi
     Column(modifier.fillMaxWidth().background(Color(0xff111815)).verticalScroll(rememberScrollState()).padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text("Androsaur · каркас", color = Color.White, fontSize = 18.sp)
         brain.note?.let { Text(it, color = Color(0xffffb454), fontSize = 14.sp) }
+        Text("${brain.hubState.ifEmpty { "Хаб: …" }} · затемнение через ${brain.dimAfterMs / 1000} с", color = Color(0xffc5cfc9), fontSize = 13.sp)
         if (brain.wakeText.isNotEmpty() && brain.lastWakeAt != null) Text("Последнее срабатывание: ${brain.wakeText}", color = Color(0xff63e6a4), fontSize = 13.sp)
         for (m in listOf(brain.audio, brain.camera)) {
             Text("${m.label}: ${m.link}", color = if (m.running) Color.White else Color(0xffffb454), fontSize = 15.sp)

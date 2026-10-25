@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The modules answer plain HTTP on this phone's loopback only. -->
+<!--
+  The modules answer plain HTTP on this phone's loopback; the hub (androsaur-hub) answers plain HTTP in the home Wi-Fi network.
+  Its address is set at run time, so cleartext cannot be limited to one host here. Whether the hub moves to HTTPS is an open question
+  in the brief; when it does, remove the base-config.
+-->
 <network-security-config>
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="false">127.0.0.1</domain>
-        <domain includeSubdomains="false">localhost</domain>
-    </domain-config>
+    <base-config cleartextTrafficPermitted="true" />
 </network-security-config>
