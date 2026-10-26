@@ -65,7 +65,7 @@ class MainActivity : ComponentActivity() {
         // Where the phone is, coarsely, for the weather; asked once. Refused, the weather comes only for a place set in the hub.
         if (!brain.weatherSource.hasLocationPermission() && savedInstanceState == null) requestPermissions(arrayOf(android.Manifest.permission.ACCESS_COARSE_LOCATION), 1)
         lifecycleScope.launch { repeatOnLifecycle(Lifecycle.State.STARTED) { withContext(Dispatchers.IO) { brain.run() } } }
-        setContent { MaterialTheme(colorScheme = darkColorScheme(primary = Color(0xff63e6a4))) { Screen(brain, ::dim) { work -> lifecycleScope.launch(Dispatchers.IO) { work() } } } }
+        setContent { MaterialTheme(colorScheme = darkColorScheme(primary = Color(0xff63e6a4))) { Screen(brain, ::dim, ::openWeather) { work -> lifecycleScope.launch(Dispatchers.IO) { work() } } } }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -79,6 +79,12 @@ class MainActivity : ComponentActivity() {
         if (!brain.hub.setUrl(url)) Log.w("Androsaur", "hub address refused: not an http(s) address")
     }
 
+    /** A tap on the weather: the hub's forecast by the hour in a WebView (it says so when there is no hub). */
+    private fun openWeather() {
+        brain.touch()
+        startActivity(Intent(this, WeatherActivity::class.java).putExtra(WeatherActivity.EXTRA_HUB, brain.hub.url))
+    }
+
     private fun dim(on: Boolean) {
         window.attributes = window.attributes.apply {
             screenBrightness = if (on) Reflexes.DIM_LEVEL else WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
@@ -87,7 +93,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-private fun Screen(brain: Brain, dim: (Boolean) -> Unit, background: (() -> Unit) -> Unit) {
+private fun Screen(brain: Brain, dim: (Boolean) -> Unit, openWeather: () -> Unit, background: (() -> Unit) -> Unit) {
     // Only the face by default; a touch shows the panel with the modules and the buttons (for looking and for the odd manual start).
     var panel by remember { mutableStateOf(false) }
     var now by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
@@ -97,7 +103,7 @@ private fun Screen(brain: Brain, dim: (Boolean) -> Unit, background: (() -> Unit
     Box(Modifier.fillMaxSize().background(Color.Black).clickable { brain.touch(); panel = !panel }) {
         Column(Modifier.fillMaxSize().safeDrawingPadding()) {
             Column(Modifier.weight(if (panel) 0.5f else 1f).fillMaxWidth()) {
-                Clock(now, compact = panel, weather = brain.weather, timerEndsAt = brain.timerEndsAt, ringing = brain.ringing)
+                Clock(now, compact = panel, weather = brain.weather, timerEndsAt = brain.timerEndsAt, ringing = brain.ringing, onWeather = openWeather)
                 Box(Modifier.weight(1f).fillMaxWidth()) { Face(brain, now) }
             }
             if (panel) Panel(brain, background, Modifier.weight(0.5f))
@@ -170,7 +176,7 @@ private val DATE = DateTimeFormatter.ofPattern("EEEE, d MMMM", Locale.forLanguag
  * [now] is the screen's tick (it only makes the clock redraw); the time itself is the wall clock.
  */
 @Composable
-private fun Clock(now: Long, compact: Boolean, weather: WeatherReading?, timerEndsAt: Long?, ringing: Boolean) {
+private fun Clock(now: Long, compact: Boolean, weather: WeatherReading?, timerEndsAt: Long?, ringing: Boolean, onWeather: () -> Unit) {
     val moment = Instant.now().atZone(ZoneId.systemDefault())
     val (dx, dy) = Reflexes.drift(now)
     val driftX by animateFloatAsState(dx.toFloat(), tween(4000), label = "clock dx")
@@ -187,8 +193,10 @@ private fun Clock(now: Long, compact: Boolean, weather: WeatherReading?, timerEn
             // The forecast strip when the hours are known; the one-line weather until then (or for weather without hours).
             val nowMs = System.currentTimeMillis()
             val columns = WeatherStrip.columns(weather, nowMs, zoneOffsetMs = java.util.TimeZone.getDefault().getOffset(nowMs).toLong())
-            if (columns.size >= 2 && nowMs - weather.fetchedAtMs < WeatherChoice.STALE_MS) WeatherStripView(columns, Modifier.padding(top = 28.dp))
-            else Text(WeatherText.line(weather, nowMs), color = Color.White.copy(alpha = 0.55f), fontSize = 20.sp, modifier = Modifier.padding(top = 12.dp))
+            // A tap on the weather opens the forecast by the hour (and does not toggle the panel, as a tap elsewhere does).
+            val tap = Modifier.clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null, onClick = onWeather)
+            if (columns.size >= 2 && nowMs - weather.fetchedAtMs < WeatherChoice.STALE_MS) WeatherStripView(columns, Modifier.padding(top = 28.dp).then(tap))
+            else Text(WeatherText.line(weather, nowMs), color = Color.White.copy(alpha = 0.55f), fontSize = 20.sp, modifier = Modifier.padding(top = 12.dp).then(tap))
         }
         // The timer: the countdown while it runs, «Время вышло» while the bell rings (a touch on the screen silences it).
         when {
