@@ -67,4 +67,34 @@ class WeatherTest {
         assertEquals("+11° · облачно · ветер 5 м/с", WeatherText.line(reading(now - 60_000), now))
         assertEquals("+11° · облачно · ветер 5 м/с · 3 ч назад", WeatherText.line(reading(now - 3 * hour), now))
     }
+
+    @Test fun theHubSaysHowLongItsWeatherIsFresh() {
+        val now = 10 * hour
+        val yandex = reading(now - 90 * 60_000).copy(validUntilMs = now + 45 * 60_000)
+        assertEquals(yandex, WeatherChoice.show(yandex, reading(now - 60_000, t = 5.0), now), "fresh for two hours, not one")
+        assertFalse(WeatherChoice.fetchOwn(yandex, null, null, spb, now))
+        val tooLong = reading(now - 7 * hour).copy(validUntilMs = now + hour)
+        assertTrue(WeatherChoice.fetchOwn(tooLong, null, null, spb, now), "never longer than six hours")
+    }
+
+    @Test fun hailAndThunderInWords() {
+        assertEquals("гроза", WeatherText.describe("thunder"))
+        assertEquals("град, гроза", WeatherText.describe("hailandthunder"))
+        assertEquals("град", WeatherText.describe("hail"))
+    }
+
+    @Test fun theStripShowsNowAndThenEveryThreeHours() {
+        val h = hour
+        val now = 999 * h + 20 * 60_000          // 999 h is a multiple of 3 h, plus 20 minutes
+        val hours = (0..24).map { HourPoint(999 * h + it * h, 10.0 + it % 5, "cloudy", 5.0) }
+        val r = reading(now - 60_000).copy(temperature = 9.6, symbol = "lightrain", hours = hours)
+        val cols = WeatherStrip.columns(r, now)
+        assertEquals(6, cols.size)
+        assertTrue(cols[0].now)
+        assertEquals(9.6, cols[0].temperature, "«Сейчас» is the weather now, not the forecast of the hour")
+        assertEquals("lightrain", cols[0].symbol)
+        assertEquals(listOf(3L, 6L, 9L, 12L, 15L), cols.drop(1).map { (it.timeMs - 999 * h) / h })
+    }
+
+    @Test fun noHoursNoStrip() = assertEquals(emptyList(), WeatherStrip.columns(reading(0), 0))
 }

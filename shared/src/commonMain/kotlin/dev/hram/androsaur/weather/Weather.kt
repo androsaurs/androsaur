@@ -9,6 +9,35 @@ data class Place(val name: String, val latitude: Double, val longitude: Double) 
     fun near(other: Place): Boolean = abs(latitude - other.latitude) < 0.01 && abs(longitude - other.longitude) < 0.01
 }
 
+/** One hour of the forecast, for the strip over the face: temperature, MET's symbol, wind. */
+data class HourPoint(val timeMs: Long, val temperature: Double, val symbol: String, val wind: Double?, val precipProb: Double? = null)
+
+/** One column of the strip: [now] is the first one, labelled «Сейчас» and showing the weather now. */
+data class StripColumn(val timeMs: Long, val temperature: Double, val symbol: String, val wind: Double?, val now: Boolean)
+
+/**
+ * The forecast strip over the face (the owner's picture: one temperature line, under it the weather's icon, the wind and the time):
+ * «Сейчас» and then every [stepHours] hours, [count] columns, so the stand shows the day at a glance without scrolling.
+ */
+object WeatherStrip {
+    /** [zoneOffsetMs] — the local time zone's offset, so «round» hours are round on the local clock. */
+    fun columns(reading: WeatherReading, nowMs: Long, stepHours: Int = 3, count: Int = 6, zoneOffsetMs: Long = 0): List<StripColumn> {
+        val hours = reading.hours.sortedBy { it.timeMs }
+        if (hours.isEmpty()) return emptyList()
+        val hourMs = 3_600_000L
+        val thisHour = nowMs - nowMs % hourMs
+        val out = mutableListOf(StripColumn(thisHour, reading.temperature, reading.symbol, reading.wind, now = true))
+        // The next columns fall on round hours of the step (12:00, 15:00…), so the labels read like a clock.
+        var next = hours.firstOrNull { it.timeMs > thisHour && (((it.timeMs + zoneOffsetMs) / hourMs) % stepHours == 0L || hours.size < 6) }?.timeMs ?: return out
+        while (out.size < count) {
+            val h = hours.firstOrNull { it.timeMs == next } ?: hours.firstOrNull { it.timeMs >= next } ?: break
+            out += StripColumn(h.timeMs, h.temperature, h.symbol, h.wind, now = false)
+            next = h.timeMs + stepHours * hourMs
+        }
+        return out
+    }
+}
+
 /**
  * The weather now and for the next 12 hours, as the hub hands it or as this phone fetched it from MET Norway. [symbol] is MET's
  * code (`cloudy`, `lightrain_day`…); times are Unix milliseconds: [timeMs] the forecast hour, [fetchedAtMs] when it was taken.
@@ -29,6 +58,10 @@ data class WeatherReading(
     val tomorrowMin: Double? = null,
     val tomorrowMax: Double? = null,
     val tomorrowSymbol: String? = null,
+    /** Until when the hub counts this weather fresh (it may ask a source rarely, e.g. Yandex every two hours); null — an hour. */
+    val validUntilMs: Long? = null,
+    /** The forecast by the hour for the next day (from the hub, or from MET when the phone asks itself). */
+    val hours: List<HourPoint> = emptyList(),
 )
 
 /**
@@ -49,9 +82,13 @@ object WeatherChoice {
     /** The place: the one set in the hub wins over where the phone is. */
     fun place(hubPlace: Place?, devicePlace: Place?): Place? = hubPlace ?: devicePlace
 
+    /** Whether the hub's weather is still fresh: until the moment the hub gave (at most six hours), or an hour without one. */
+    fun hubFresh(hub: WeatherReading, nowMs: Long): Boolean =
+        nowMs < (hub.validUntilMs?.coerceAtMost(hub.fetchedAtMs + 6 * 3_600_000L) ?: (hub.fetchedAtMs + HUB_FRESH_MS))
+
     /** What to show: the hub's weather while it is fresh, otherwise the newer of the two; nothing older than [DROP_MS]. */
     fun show(hub: WeatherReading?, own: WeatherReading?, nowMs: Long): WeatherReading? {
-        if (hub != null && nowMs - hub.fetchedAtMs < HUB_FRESH_MS) return hub
+        if (hub != null && hubFresh(hub, nowMs)) return hub
         return listOfNotNull(hub, own).filter { nowMs - it.fetchedAtMs < DROP_MS }.maxByOrNull { it.fetchedAtMs }
     }
 
@@ -61,7 +98,7 @@ object WeatherChoice {
      */
     fun fetchOwn(hub: WeatherReading?, own: WeatherReading?, ownPlace: Place?, place: Place?, nowMs: Long): Boolean {
         if (place == null) return false
-        if (hub != null && nowMs - hub.fetchedAtMs < HUB_FRESH_MS) return false
+        if (hub != null && hubFresh(hub, nowMs)) return false
         return own == null || ownPlace == null || !ownPlace.near(place) || nowMs - own.fetchedAtMs >= OWN_EVERY_MS
     }
 }
@@ -78,8 +115,9 @@ object WeatherText {
         }
     }
 
-    private val sky = mapOf("clearsky" to "ясно", "fair" to "малооблачно", "partlycloudy" to "переменная облачность", "cloudy" to "облачно", "fog" to "туман")
-    private val precipitation = mapOf("rain" to "дождь", "sleet" to "мокрый снег", "snow" to "снег")
+    private val sky = mapOf("clearsky" to "ясно", "fair" to "малооблачно", "partlycloudy" to "переменная облачность", "cloudy" to "облачно",
+        "fog" to "туман", "thunder" to "гроза")
+    private val precipitation = mapOf("rain" to "дождь", "sleet" to "мокрый снег", "snow" to "снег", "hail" to "град")
 
     /** MET's code in words: `lightrainshowers_day` is «небольшой кратковременный дождь». */
     fun describe(symbol: String): String {

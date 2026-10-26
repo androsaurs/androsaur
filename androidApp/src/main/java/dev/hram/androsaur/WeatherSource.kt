@@ -9,6 +9,7 @@ import android.location.Location
 import android.location.LocationManager
 import android.os.Build
 import android.util.Log
+import dev.hram.androsaur.weather.HourPoint
 import dev.hram.androsaur.weather.Place
 import dev.hram.androsaur.weather.WeatherReading
 import org.json.JSONObject
@@ -125,6 +126,19 @@ class WeatherSource(private val context: Context, private val prefs: SharedPrefe
                 val distance = kotlin.math.abs(at.hour + at.minute / 60.0 - 12)
                 if (code.isNotEmpty() && (noon == null || distance < noon.first)) noon = distance to code
             }
+            // The forecast by the hour for the next day, for the strip over the face.
+            val hours = mutableListOf<HourPoint>()
+            for (i in 0 until series.length()) {
+                val point = series.getJSONObject(i)
+                val at = Instant.parse(point.getString("time")).toEpochMilli()
+                if (at > nowMs + 25 * 3_600_000L) break
+                val d = point.getJSONObject("data")
+                val hourly = d.optJSONObject("next_1_hours") ?: continue
+                val det = d.getJSONObject("instant").getJSONObject("details")
+                if (!det.has("air_temperature")) continue
+                hours += HourPoint(at, det.getDouble("air_temperature"), hourly.optJSONObject("summary")?.optString("symbol_code").orEmpty(),
+                    if (det.has("wind_speed")) det.getDouble("wind_speed") else null)
+            }
             val temps = (0 until minOf(12, series.length())).mapNotNull { i ->
                 series.getJSONObject(i).getJSONObject("data").getJSONObject("instant").getJSONObject("details").let { d -> if (d.has("air_temperature")) d.getDouble("air_temperature") else null }
             }
@@ -132,7 +146,7 @@ class WeatherSource(private val context: Context, private val prefs: SharedPrefe
                 place, details.getDouble("air_temperature"), symbol,
                 if (details.has("wind_speed")) details.getDouble("wind_speed") else null, temps.minOrNull(), temps.maxOrNull(),
                 Instant.parse(first.getString("time")).toEpochMilli(), nowMs, later?.first, later?.second,
-                tomorrowTemps.minOrNull(), tomorrowTemps.maxOrNull(), noon?.second,
+                tomorrowTemps.minOrNull(), tomorrowTemps.maxOrNull(), noon?.second, hours = hours,
             )
         }
 
@@ -148,6 +162,12 @@ class WeatherSource(private val context: Context, private val prefs: SharedPrefe
             o.optString("laterSymbol").takeIf { it.isNotEmpty() && it != "null" }, o.optLong("laterTimeMs").takeIf { it > 0 },
             o.optDouble("tomorrowMin").takeUnless { it.isNaN() }, o.optDouble("tomorrowMax").takeUnless { it.isNaN() },
             o.optString("tomorrowSymbol").takeIf { it.isNotEmpty() && it != "null" },
+            o.optLong("validUntilMs").takeIf { it > 0 },
+            o.optJSONArray("hours")?.let { a -> List(a.length()) { a.getJSONObject(it) }.mapNotNull { h ->
+                if (!h.has("timeMs") || !h.has("temperature")) null
+                else HourPoint(h.getLong("timeMs"), h.getDouble("temperature"), h.optString("symbol"),
+                    h.optDouble("wind").takeUnless { it.isNaN() }, h.optDouble("precipProb").takeUnless { it.isNaN() })
+            } }.orEmpty(),
         )
 
         fun readingJson(r: WeatherReading): JSONObject = JSONObject().put("place", r.place).put("temperature", r.temperature).put("symbol", r.symbol)
@@ -155,7 +175,11 @@ class WeatherSource(private val context: Context, private val prefs: SharedPrefe
             .put("timeMs", r.timeMs).put("fetchedAtMs", r.fetchedAtMs)
             .put("laterSymbol", r.laterSymbol ?: JSONObject.NULL).put("laterTimeMs", r.laterTimeMs ?: JSONObject.NULL)
             .put("tomorrowMin", r.tomorrowMin ?: JSONObject.NULL).put("tomorrowMax", r.tomorrowMax ?: JSONObject.NULL)
-            .put("tomorrowSymbol", r.tomorrowSymbol ?: JSONObject.NULL)
+            .put("tomorrowSymbol", r.tomorrowSymbol ?: JSONObject.NULL).put("validUntilMs", r.validUntilMs ?: JSONObject.NULL)
+            .put("hours", org.json.JSONArray(r.hours.map { h ->
+                JSONObject().put("timeMs", h.timeMs).put("temperature", h.temperature).put("symbol", h.symbol)
+                    .put("wind", h.wind ?: JSONObject.NULL).put("precipProb", h.precipProb ?: JSONObject.NULL)
+            }))
 
         fun placeOf(text: String): Place? = runCatching { JSONObject(text).let { Place(it.optString("name"), it.getDouble("latitude"), it.getDouble("longitude")) } }.getOrNull()
         fun placeJson(p: Place): JSONObject = JSONObject().put("name", p.name).put("latitude", p.latitude).put("longitude", p.longitude)

@@ -40,6 +40,8 @@ import dev.hram.androsaur.face.Expression
 import dev.hram.androsaur.face.Reflexes
 import dev.hram.androsaur.commands.Answers
 import dev.hram.androsaur.weather.WeatherReading
+import dev.hram.androsaur.weather.WeatherChoice
+import dev.hram.androsaur.weather.WeatherStrip
 import dev.hram.androsaur.weather.WeatherText
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -123,7 +125,8 @@ private fun Face(brain: Brain, now: Long) {
     Box(Modifier.fillMaxSize()) {
     Canvas(Modifier.fillMaxSize()) {
         val room = 14.dp.toPx()
-        val c = Offset(size.width / 2 + driftX * room, size.height / 2 + driftY * room)
+        // The face sits a little above the middle of its area: centred, it looked pressed to the bottom under the clock and forecast.
+        val c = Offset(size.width / 2 + driftX * room, size.height * 0.42f + driftY * room)
         val r = minOf(size.width * 0.17f, size.height * 0.28f) * eyeScale
         val gap = size.width * 0.22f
         for (side in listOf(-1f, 1f)) {
@@ -173,21 +176,29 @@ private fun Clock(now: Long, compact: Boolean, weather: WeatherReading?, timerEn
     val driftX by animateFloatAsState(dx.toFloat(), tween(4000), label = "clock dx")
     val driftY by animateFloatAsState(dy.toFloat(), tween(4000), label = "clock dy")
     Column(
-        Modifier.fillMaxWidth().padding(top = if (compact) 6.dp else 18.dp)
+        // Narrower than the screen and with air between the lines: the clock, the date, the forecast and the timer each stand apart.
+        Modifier.fillMaxWidth().padding(top = if (compact) 6.dp else 22.dp, start = if (compact) 0.dp else 28.dp, end = if (compact) 0.dp else 28.dp)
             .offset { androidx.compose.ui.unit.IntOffset((driftX * 14.dp.toPx()).toInt(), (driftY * 6.dp.toPx()).toInt()) },
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(moment.format(TIME), color = Color.White.copy(alpha = 0.8f), fontSize = if (compact) 30.sp else 56.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Light)
-        if (!compact) Text(moment.format(DATE), color = Color.White.copy(alpha = 0.55f), fontSize = 20.sp)
-        if (!compact && weather != null) Text(WeatherText.line(weather, System.currentTimeMillis()), color = Color.White.copy(alpha = 0.55f), fontSize = 20.sp)
+        if (!compact) Text(moment.format(DATE), color = Color.White.copy(alpha = 0.55f), fontSize = 20.sp, modifier = Modifier.padding(top = 6.dp))
+        if (!compact && weather != null) {
+            // The forecast strip when the hours are known; the one-line weather until then (or for weather without hours).
+            val nowMs = System.currentTimeMillis()
+            val columns = WeatherStrip.columns(weather, nowMs, zoneOffsetMs = java.util.TimeZone.getDefault().getOffset(nowMs).toLong())
+            if (columns.size >= 2 && nowMs - weather.fetchedAtMs < WeatherChoice.STALE_MS) WeatherStripView(columns, Modifier.padding(top = 28.dp))
+            else Text(WeatherText.line(weather, nowMs), color = Color.White.copy(alpha = 0.55f), fontSize = 20.sp, modifier = Modifier.padding(top = 12.dp))
+        }
         // The timer: the countdown while it runs, «Время вышло» while the bell rings (a touch on the screen silences it).
         when {
             ringing -> {
-                Text("⏰ Время вышло", color = Color(0xffffb454), fontSize = if (compact) 18.sp else 30.sp)
+                Text("⏰ Время вышло", color = Color(0xffffb454), fontSize = if (compact) 18.sp else 30.sp, modifier = Modifier.padding(top = if (compact) 0.dp else 20.dp))
                 if (!compact) Text("коснитесь экрана или скажите «стоп»", color = Color(0xffffb454).copy(alpha = 0.8f), fontSize = 18.sp,
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(horizontal = 16.dp))
             }
-            timerEndsAt != null -> Text("Таймер ${Answers.countdown(((timerEndsAt - System.currentTimeMillis() + 999) / 1000).toInt())}", color = Color(0xff63e6a4), fontSize = if (compact) 18.sp else 30.sp)
+            timerEndsAt != null -> Text("Таймер ${Answers.countdown(((timerEndsAt - System.currentTimeMillis() + 999) / 1000).toInt())}", color = Color(0xff63e6a4), fontSize = if (compact) 18.sp else 30.sp,
+                modifier = Modifier.padding(top = if (compact) 0.dp else 20.dp))
         }
     }
 }
