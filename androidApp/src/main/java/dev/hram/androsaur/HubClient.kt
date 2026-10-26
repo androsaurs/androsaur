@@ -61,6 +61,10 @@ class HubClient(context: Context, private val prefs: SharedPreferences) {
         val config: JSONObject?, val commands: List<Command>, val peopleRev: Int = 0, val upload: List<String> = emptyList(),
         /** The place of the weather set in the hub (null — none, the phone uses its own) and the hub's weather for it. */
         val weatherPlace: JSONObject? = null, val weather: JSONObject? = null,
+        /** Reliable transcriptions of this phone's notes (id to text), when the hub has Groq: the notes are then read out. */
+        val transcripts: Map<String, String> = emptyMap(),
+        /** Roles of the people of the house (person id to words such as «папа»), when the hub sent them; null — keep the last ones. */
+        val roles: Map<String, List<String>>? = null,
     )
 
     /** Whom the camera knows, for the hub: [people] are objects with id, name, samples and digest (no sets); [faceModel] is the camera's face model. */
@@ -104,9 +108,13 @@ class HubClient(context: Context, private val prefs: SharedPreferences) {
         val config = JSONObject().put("rev", body.optInt("rev", 0)).put("values", body.optJSONObject("values") ?: JSONObject())
         val place = body.optJSONObject("weatherPlace")
         val weather = body.optJSONObject("weather")
-        if (config.toString() == stored().toString()) return Result.success(Reply(null, commands, peopleRev, upload, place, weather))
+        val texts = body.optJSONArray("transcripts")?.let { a -> List(a.length()) { a.getJSONObject(it) }.associate { it.optString("id") to it.optString("text") } }.orEmpty()
+        val roles = body.optJSONArray("roles")?.let { a ->
+            List(a.length()) { a.getJSONObject(it) }.associate { r -> r.optString("person") to r.optJSONArray("words").let { w -> List(w?.length() ?: 0) { w!!.getString(it) } } }
+        }
+        if (config.toString() == stored().toString()) return Result.success(Reply(null, commands, peopleRev, upload, place, weather, texts, roles))
         prefs.edit().putString(KEY_CONFIG, config.toString()).apply()
-        return Result.success(Reply(config, commands, peopleRev, upload, place, weather))
+        return Result.success(Reply(config, commands, peopleRev, upload, place, weather, texts, roles))
     }
 
     /** Hands the hub the sets of the people it asked for (the camera's export, filtered). The sets are never logged. */
@@ -114,6 +122,22 @@ class HubClient(context: Context, private val prefs: SharedPreferences) {
         val base = url.ifEmpty { return false }
         val body = JSONObject().put("device", deviceId).put("faceModel", faceModel).put("people", people)
         return call("POST", "$base/api/device/people/upload", body, readTimeoutMs = 20_000)?.first == 204
+    }
+
+    /** Hands the hub the sound of a voice note (WAV) for transcription. True when the hub has it (now or before). */
+    fun uploadNote(id: String, to: String, from: String, createdMs: Long, durationMs: Long, wav: ByteArray): Boolean {
+        val base = url.ifEmpty { return false }
+        val q = "device=$deviceId&to=${java.net.URLEncoder.encode(to, "UTF-8")}&from=${java.net.URLEncoder.encode(from, "UTF-8")}&createdMs=$createdMs&durationMs=$durationMs"
+        var connection: HttpURLConnection? = null
+        return try {
+            connection = (URL("$base/api/device/notes/$id?$q").openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"; connectTimeout = 3000; readTimeout = 20_000; doOutput = true
+                setRequestProperty("Content-Type", "audio/wav")
+                outputStream.use { it.write(wav) }
+            }
+            connection.responseCode in 200..201
+        } catch (_: Exception) { false }
+        finally { connection?.disconnect() }
     }
 
     /** The people of the house with their sets ({rev, faceModel, people}), or null when the hub did not give them. */

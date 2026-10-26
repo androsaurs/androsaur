@@ -12,6 +12,7 @@ import dev.hram.androsaur.face.Reflexes
 import dev.hram.androsaur.hub.HubSettings
 import dev.hram.androsaur.hub.Rename
 import dev.hram.androsaur.commands.Answers
+import dev.hram.androsaur.commands.Calculator
 import dev.hram.androsaur.weather.Greeting
 import dev.hram.androsaur.weather.WeatherChoice
 import dev.hram.androsaur.weather.WeatherReading
@@ -166,6 +167,12 @@ class Brain(context: Context) {
             hubState = "Хаб: на связи (${hub.url})"
             reply.config?.let { dimAfterMs = applyConfig(it); greetingOn = greetingFrom(it) }
             weatherSource.fromHub(reply.weatherPlace, reply.weather)
+            applyTranscripts(reply.transcripts)
+            reply.roles?.let { r ->
+                val json = JSONObject(r.mapValues { JSONArray(it.value) }).toString()
+                if (json != prefs.getString("roles", "{}")) { prefs.edit().putString("roles", json).apply(); cameraPeople()?.let { sendPeople(it) } }
+            }
+            uploadNotes()
             done = reply.commands.map { HubClient.Done(it.id, execute(it)) }
             if (reply.upload.isNotEmpty()) uploadPeople(reply.upload)
             if (reply.peopleRev != hub.peopleRev) loadHousePeople()
@@ -260,8 +267,27 @@ class Brain(context: Context) {
     }
 
     /** Hands the camera's people (id, name) to the audio module, which keeps its recipients by id: a renamed person is updated in place. */
-    private fun sendPeople(people: List<Pair<String, String>>): Boolean =
-        audioClient.post("/recipients", JSONObject().put("addPeople", JSONArray(people.map { JSONObject().put("id", it.first).put("name", it.second) })))?.first == 200
+    /**
+     * Keeps the audio module's recipient book: the people the camera knows (name and permanent id), then their roles from the hub
+     * («папа» for Женя — the note goes to his id). This app owns the book: a role nobody is behind is not in it, so it can never
+     * swallow a note meant for a person (as «жена» once took the notes for «Женя»). Without the hub the last roles received are used.
+     */
+    private fun sendPeople(people: List<Pair<String, String>>): Boolean {
+        val names = people.toMap()
+        val book = JSONArray()
+        for ((id, name) in people) book.put(JSONObject().put("id", name).put("personId", id))
+        for ((personId, words) in roles()) {
+            val name = names[personId] ?: continue // a person this phone's camera does not know
+            for (word in words) book.put(JSONObject().put("id", word).put("person", name).put("personId", personId))
+        }
+        return audioClient.post("/recipients", JSONObject().put("recipients", book))?.first == 200
+    }
+
+    /** The roles of the people (person id to words), as the hub last sent them. */
+    private fun roles(): Map<String, List<String>> = runCatching {
+        val o = JSONObject(prefs.getString("roles", "{}") ?: "{}")
+        o.keys().asSequence().associateWith { k -> o.getJSONArray(k).let { a -> List(a.length()) { a.getString(it) } } }
+    }.getOrDefault(emptyMap())
 
     /**
      * Notes made before ids are tied once to the person whose current name they were left for (and to who left them), so that a
@@ -314,6 +340,7 @@ class Brain(context: Context) {
                     setTimer(System.currentTimeMillis() + seconds * 1000L)
                     say(Answers.timerSet(seconds))
                 }
+                "calc" -> Calculator.answer(data.optString("expression"))?.let { say(it) }
                 "timer_left" -> say(Answers.timerLeft(timerEndsAt?.let { ((it - System.currentTimeMillis()) / 1000).toInt() }))
                 // «Стоп» that silenced the bell needs no words; «стоп» while the timer only counts down switches it off.
                 "stop" -> if (data.optString("wasRinging") != "true" && timerEndsAt != null) { setTimer(null); say(Answers.TIMER_OFF) }
@@ -336,6 +363,40 @@ class Brain(context: Context) {
             }
             weather = WeatherChoice.show(weatherSource.hubWeather, weatherSource.ownWeather, System.currentTimeMillis())
             delay(60_000)
+        }
+    }
+
+    /** Note ids the hub already has (their sound was handed over), and the transcriptions already put to the notes. */
+    private val uploadedNotes = java.util.Collections.synchronizedSet(prefs.getStringSet("notes_uploaded", emptySet())!!.toMutableSet())
+    private val appliedTexts = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+
+    /**
+     * Hands the hub the sound of new voice notes nobody has heard yet, for transcription (only when the hub is there — the notes
+     * stay sound on the phone either way). Heard notes are not sent: nobody will be read them.
+     */
+    private fun uploadNotes() {
+        if (!audio.running) return
+        val list = audioClient.get("/notes")?.second?.optJSONArray("notes") ?: return
+        val notes = List(list.length()) { list.getJSONObject(it) }
+        for (n in notes) {
+            val id = n.optString("id")
+            if (id.isEmpty() || id in uploadedNotes || n.optBoolean("heard") || n.optBoolean("hasText")) continue
+            val wav = audioClient.getBytes("/notes/audio?id=$id") ?: continue
+            if (hub.uploadNote(id, n.optString("to"), n.optString("from"), n.optLong("createdAtMs"), n.optLong("durationMs"), wav)) uploadedNotes += id
+        }
+        // Only the notes still on the phone are remembered.
+        val present = notes.map { it.optString("id") }.toSet()
+        uploadedNotes.retainAll(present)
+        prefs.edit().putStringSet("notes_uploaded", uploadedNotes.toSet()).apply()
+    }
+
+    /** Puts the hub's transcriptions to the notes: those are then read out by the synthesis instead of played. */
+    private fun applyTranscripts(texts: Map<String, String>) {
+        if (!audio.running) return
+        for ((id, text) in texts) {
+            if (id in appliedTexts || text.isBlank()) continue
+            val reply = audioClient.post("/notes/text", JSONObject().put("id", id).put("text", text))
+            if (reply?.first == 200) appliedTexts += id
         }
     }
 

@@ -44,6 +44,20 @@ class ModuleClient(private val context: Context, val id: String, val label: Stri
     fun get(path: String): Pair<Int, JSONObject>? = call("GET", path, null)
     fun post(path: String, body: JSONObject): Pair<Int, JSONObject>? = call("POST", path, body)
 
+    /** The raw bytes of a GET (a note's WAV), or null when the module does not answer or says no. */
+    fun getBytes(path: String): ByteArray? {
+        val l = link ?: return null
+        var connection: HttpURLConnection? = null
+        return try {
+            connection = (URL("http://127.0.0.1:${l.port}$path").openConnection() as HttpURLConnection).apply {
+                connectTimeout = 800; readTimeout = 5000
+                setRequestProperty("Authorization", "Bearer ${l.token}")
+            }
+            if (connection.responseCode == 200) connection.inputStream.use { it.readBytes() } else null
+        } catch (_: Exception) { null }
+        finally { connection?.disconnect() }
+    }
+
     private fun call(method: String, path: String, body: JSONObject?): Pair<Int, JSONObject>? {
         val l = link ?: return null
         var connection: HttpURLConnection? = null
