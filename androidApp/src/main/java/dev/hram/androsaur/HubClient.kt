@@ -43,6 +43,12 @@ class HubClient(context: Context, private val prefs: SharedPreferences) {
     fun value(config: JSONObject, module: String, key: String): Long? =
         config.optJSONObject("values")?.optJSONObject(module)?.takeIf { it.has(key) }?.optLong(key)
 
+    fun stringValue(config: JSONObject, module: String, key: String): String? =
+        config.optJSONObject("values")?.optJSONObject(module)?.opt(key) as? String
+
+    /** Receipt is not application: acknowledge only after local settings and the audio module agree. */
+    fun acknowledgeConfig() { prefs.edit().putInt(KEY_APPLIED, stored().optInt("rev", 0)).apply() }
+
     /**
      * A command from the hub: `rename_person` (the person with the permanent id [person] is renamed [to]) or `merge_person`
      * (the person [person] of this phone is the person [into] of the house, called [to]).
@@ -83,7 +89,7 @@ class HubClient(context: Context, private val prefs: SharedPreferences) {
      */
     fun sync(people: People?, done: List<Done>): Result<Reply> {
         val base = url.ifEmpty { return Result.success(Reply(null, emptyList())) }
-        val applied = stored().optInt("rev", 0)
+        val applied = prefs.getInt(KEY_APPLIED, 0)
         val report = JSONObject().put("device", deviceId).put("applied", applied)
             .put("done", JSONArray().apply { done.forEach { put(JSONObject().put("id", it.id).put("ok", it.error == null).put("error", it.error ?: JSONObject.NULL)) } })
         if (people != null) report.put("people", people.people).put("faceModel", people.faceModel)
@@ -178,5 +184,5 @@ class HubClient(context: Context, private val prefs: SharedPreferences) {
         finally { connection?.disconnect() }
     }
 
-    private companion object { const val KEY_URL = "hub_url"; const val KEY_DEVICE = "hub_device_id"; const val KEY_CONFIG = "hub_config"; const val KEY_PEOPLE_REV = "hub_people_rev" }
+    private companion object { const val KEY_URL = "hub_url"; const val KEY_DEVICE = "hub_device_id"; const val KEY_CONFIG = "hub_config"; const val KEY_PEOPLE_REV = "hub_people_rev"; const val KEY_APPLIED = "hub_applied_rev" }
 }

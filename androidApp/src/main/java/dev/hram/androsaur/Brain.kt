@@ -9,7 +9,10 @@ import dev.hram.androsaur.delivery.Delivery
 import dev.hram.androsaur.delivery.DeliveryGate
 import dev.hram.androsaur.delivery.WaitingNote
 import dev.hram.androsaur.face.Reflexes
+import dev.hram.androsaur.character.CharacterMode
+import dev.hram.androsaur.character.CharacterState
 import dev.hram.androsaur.hub.HubSettings
+import dev.hram.androsaur.hub.WakePhraseSettings
 import dev.hram.androsaur.hub.Rename
 import dev.hram.androsaur.commands.Answers
 import dev.hram.androsaur.commands.Calculator
@@ -20,6 +23,8 @@ import org.json.JSONArray
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONObject
 
 /** What the screen shows about one module. */
@@ -33,6 +38,14 @@ class Brain(context: Context) {
     private val audioClient = ModuleClient(context, "audio", "Звук", "dev.hram.androsaur.audio", "AudioService")
     private val cameraClient = ModuleClient(context, "camera", "Камера", "dev.hram.androsaur.camera", "CameraService")
     private val prefs = context.getSharedPreferences("brain", Context.MODE_PRIVATE)
+    var characterMode by mutableStateOf(CharacterMode.restore(prefs.getString("character_mode", null))); private set
+    private val characterState = MutableStateFlow(CharacterState())
+    val character = characterState.asStateFlow()
+
+    fun chooseCharacterMode(mode: CharacterMode) {
+        characterMode = mode
+        prefs.edit().putString("character_mode", mode.name).apply()
+    }
     val hub = HubClient(context, prefs)
     val weatherSource = WeatherSource(context, prefs)
     /** The weather to show under the clock, or null when there is none (no place known, nothing fetched, or too old). */
@@ -44,6 +57,7 @@ class Brain(context: Context) {
     var note by mutableStateOf<String?>(null); private set
     /** How the link to the hub is doing, for the panel. */
     var hubState by mutableStateOf(""); private set
+    var wakeSettingsState by mutableStateOf(""); private set
     /** After how long without anybody the screen dims; the hub can change it, the last value received is used without the hub. */
     @Volatile var dimAfterMs = applyConfig(hub.stored()); private set
     /** Whether to greet a person at the first meeting of the day (a hub setting, on by default). */
@@ -125,13 +139,27 @@ class Brain(context: Context) {
 
     /** The polling loop; call it from a background coroutine and cancel it when the screen goes away. */
     suspend fun run() = coroutineScope {
+        launch { followCharacter() }
         launch { followMouth() }
         launch { deliverNotes() }
         launch { shareContext() }
         launch { syncHub() }
+        launch { followAudioSettings() }
         launch { followWeather() }
         launch { followCommands() }
         loop()
+    }
+
+    /** Publish complete visual snapshots independently of either renderer and of the clock UI. */
+    private suspend fun followCharacter() {
+        while (true) {
+            val now = SystemClock.elapsedRealtime()
+            characterState.value = CharacterState.from(
+                expression(now), face?.let { Reflexes.gaze(it.first, it.second) } ?: (0.0 to 0.0),
+                speaking, mouth, mode, Reflexes.dimmed(now, lastActivityAt, dimAfterMs),
+            )
+            delay(50)
+        }
     }
 
     /** Polls the speech state fast while the assistant talks (the mouth needs about 15 updates a second) and slowly while it is quiet. */
@@ -166,6 +194,7 @@ class Brain(context: Context) {
             }
             hubState = "Хаб: на связи (${hub.url})"
             reply.config?.let { dimAfterMs = applyConfig(it); greetingOn = greetingFrom(it) }
+            if (applyAudioSettings()) hub.acknowledgeConfig()
             weatherSource.fromHub(reply.weatherPlace, reply.weather)
             applyTranscripts(reply.transcripts)
             reply.roles?.let { r ->
@@ -178,6 +207,40 @@ class Brain(context: Context) {
             if (reply.peopleRev != hub.peopleRev) loadHousePeople()
             if (reply.config == null && done.isEmpty()) delay(HUB_EVERY_MS)
         }
+    }
+
+    /** Reapply the last hub choice even offline and after the audio process restarts. */
+    private suspend fun followAudioSettings() {
+        while (true) { applyAudioSettings(); delay(5_000) }
+    }
+
+    @Synchronized
+    private fun applyAudioSettings(): Boolean {
+        val configured = hub.stringValue(hub.stored(), "audio", "phrase")
+        if (configured != null && !prefs.getBoolean("wake_phrase_managed", false))
+            prefs.edit().putBoolean("wake_phrase_managed", true).apply()
+        val target = WakePhraseSettings.target(configured, prefs.getBoolean("wake_phrase_managed", false))
+            ?: return true
+        fun pending(message: String): Boolean { wakeSettingsState = message; return false }
+        if (!audio.running) return pending("Фраза из хаба: жду модуль звука")
+        val status = audioClient.get("/status")?.takeIf { it.first == 200 }?.second
+            ?: return pending("Фраза из хаба: модуль звука не отвечает")
+        val engine = status.optJSONObject("engine")
+        val id = engine?.optString("id").orEmpty()
+        if (!WakePhraseSettings.supportsPhrase(id))
+            return pending("Фраза из хаба: движок $id не поддерживает настройку фразы")
+        val phrase = status.optString("phrase")
+        if (phrase != target) {
+            if (speaking || mode.isNotEmpty()) return pending("Фраза из хаба: применю после речи или записи")
+            val reply = audioClient.post("/engine", JSONObject().put("phrase", target))
+            if (reply?.first != 200)
+                return pending("Фраза из хаба не применена: ${reply?.second?.optString("error") ?: "нет ответа"}")
+            return pending("Фраза «$target»: жду готовности распознавания")
+        }
+        if (!WakePhraseSettings.applied(target, phrase, id, engine?.optString("state").orEmpty(), status.optBoolean("listening")))
+            return pending("Фраза «$target»: распознавание ещё не готово")
+        wakeSettingsState = "Фраза из хаба: «$target» · применена"
+        return true
     }
 
     /** Whom the camera knows for the hub: id, name, number of sets and their fingerprint (not the sets), and the face model. */
