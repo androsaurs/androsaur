@@ -19,6 +19,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -98,7 +99,7 @@ private fun Screen(brain: Brain, dim: (Boolean) -> Unit, openWeather: () -> Unit
     var panel by remember { mutableStateOf(false) }
     var now by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
     val character by brain.character.collectAsStateWithLifecycle()
-    var characterError by remember(brain.characterMode) { mutableStateOf<String?>(null) }
+    var characterError by remember(brain.characterMode, brain.characterId) { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) { while (true) { now = SystemClock.elapsedRealtime(); delay(100) } }
     val dimmed = character.dimmed
     LaunchedEffect(dimmed) { dim(dimmed) }
@@ -121,7 +122,7 @@ private fun Face(brain: Brain, state: CharacterState, now: Long, onCharacterErro
     if (badge.isNotEmpty()) shown = badge
     val alpha by animateFloatAsState(if (badge.isNotEmpty()) 1f else 0f, tween(500), label = "badge")
     Box(Modifier.fillMaxSize()) {
-        CharacterView(state, brain.characterMode, now, onCharacterError)
+        CharacterView(state, brain.characterMode, now, onCharacterError, brain.characterId)
         // What to do now, in words: the person should never wonder whether to talk.
         when (state.interaction) {
             Interaction.COMMAND -> Caption("Слушаю", "скажите: «передай жене …»", Modifier.align(Alignment.BottomCenter))
@@ -186,6 +187,7 @@ private fun Caption(title: String, hint: String?, modifier: Modifier, color: Col
 
 @Composable
 private fun Panel(brain: Brain, background: (() -> Unit) -> Unit, modifier: Modifier, characterError: String?) {
+    val uri = LocalUriHandler.current
     Column(modifier.fillMaxWidth().background(Color(0xff111815)).verticalScroll(rememberScrollState()).padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text("Androsaur · каркас", color = Color.White, fontSize = 18.sp)
         Text("Персонаж", color = Color.White, fontSize = 15.sp)
@@ -197,7 +199,11 @@ private fun Panel(brain: Brain, background: (() -> Unit) -> Unit, modifier: Modi
                 )
             }
         }
-        Text(if (brain.characterMode == CharacterMode.SIMPLE) "Глаза и рот" else "Пробный персонаж Rive", color = Color(0xffc5cfc9), fontSize = 13.sp)
+        Text(if (brain.characterMode == CharacterMode.SIMPLE) "Глаза и рот" else brain.characterId.title, color = Color(0xffc5cfc9), fontSize = 13.sp)
+        TextButton(onClick = { uri.openUri(brain.hub.url.trimEnd('/') + "/characters") }, enabled = brain.hub.url.isNotEmpty()) {
+            Text("Каталог · выбрать для себя")
+        }
+        if (brain.hub.url.isEmpty()) Text("Для выбора персонажа подключи хаб", color = Color(0xffc5cfc9), fontSize = 13.sp)
         characterError?.let { Text(it, color = Color(0xffffb454), fontSize = 13.sp) }
         brain.note?.let { Text(it, color = Color(0xffffb454), fontSize = 14.sp) }
         Text("${brain.hubState.ifEmpty { "Хаб: …" }} · затемнение через ${brain.dimAfterMs / 1000} с", color = Color(0xffc5cfc9), fontSize = 13.sp)

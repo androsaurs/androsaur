@@ -22,6 +22,7 @@ data class CharacterState(
     val mouthOpen: Float = 0f,
     val interaction: Interaction = Interaction.IDLE,
     val dimmed: Boolean = false,
+    val accessory: CharacterAccessory = CharacterAccessory.NONE,
 ) {
     val sleeping: Boolean get() = expression == Expression.SLEEPY && !speaking && interaction == Interaction.IDLE
 

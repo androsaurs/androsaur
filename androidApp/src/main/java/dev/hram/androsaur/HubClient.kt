@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import android.os.Build
 import android.provider.Settings
 import dev.hram.androsaur.hub.HubSettings
+import dev.hram.androsaur.character.AccessoryEdit
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -71,6 +72,8 @@ class HubClient(context: Context, private val prefs: SharedPreferences) {
         val transcripts: Map<String, String> = emptyMap(),
         /** Roles of the people of the house (person id to words such as «папа»), when the hub sent them; null — keep the last ones. */
         val roles: Map<String, List<String>>? = null,
+        val characters: Map<String, String>? = null,
+        val accessories: Map<String, Map<String, String>>? = null,
     )
 
     /** Whom the camera knows, for the hub: [people] are objects with id, name, samples and digest (no sets); [faceModel] is the camera's face model. */
@@ -118,9 +121,13 @@ class HubClient(context: Context, private val prefs: SharedPreferences) {
         val roles = body.optJSONArray("roles")?.let { a ->
             List(a.length()) { a.getJSONObject(it) }.associate { r -> r.optString("person") to r.optJSONArray("words").let { w -> List(w?.length() ?: 0) { w!!.getString(it) } } }
         }
-        if (config.toString() == stored().toString()) return Result.success(Reply(null, commands, peopleRev, upload, place, weather, texts, roles))
+        val characters = body.optJSONObject("characters")?.let { obj ->
+            obj.keys().asSequence().associateWith { obj.optString(it) }
+        }
+        val accessories = parseAccessories(body)
+        if (config.toString() == stored().toString()) return Result.success(Reply(null, commands, peopleRev, upload, place, weather, texts, roles, characters, accessories))
         prefs.edit().putString(KEY_CONFIG, config.toString()).apply()
-        return Result.success(Reply(config, commands, peopleRev, upload, place, weather, texts, roles))
+        return Result.success(Reply(config, commands, peopleRev, upload, place, weather, texts, roles, characters, accessories))
     }
 
     /** Hands the hub the sets of the people it asked for (the camera's export, filtered). The sets are never logged. */
@@ -153,6 +160,35 @@ class HubClient(context: Context, private val prefs: SharedPreferences) {
         return reply?.takeIf { it.first == 200 }?.second
     }
 
+    /** Fresh choices without registering, weather, face vectors or the 30-second sync cycle. */
+    class Appearance(val characters: Map<String, String>, val accessories: Map<String, Map<String, String>>?)
+
+    private fun parseAccessories(body: JSONObject): Map<String, Map<String, String>>? = body.optJSONObject("accessories")?.let { all ->
+        all.keys().asSequence().associateWith { person ->
+            all.optJSONObject(person)?.let { row -> row.keys().asSequence().associateWith { row.optString(it) } }.orEmpty()
+        }
+    }
+
+    private fun appearance(body: JSONObject): Appearance? {
+        val characters = body.optJSONObject("characters") ?: return null
+        return Appearance(characters.keys().asSequence().associateWith { characters.optString(it) }, parseAccessories(body))
+    }
+
+    fun characters(): Appearance? {
+        val base = url.ifEmpty { return null }
+        val response = call("GET", "$base/api/characters", null, readTimeoutMs = 1200, connectTimeoutMs = 1000)
+            ?.takeIf { it.first == 200 }?.second ?: return null
+        return appearance(response)
+    }
+
+    /** Null/5xx stays queued; 409 means the personal character changed while the edit was offline. */
+    fun setAccessory(edit: AccessoryEdit): Pair<Int, Appearance?>? {
+        val base = url.ifEmpty { return null }
+        val body = JSONObject().put("person", edit.person).put("character", edit.character).put("accessory", edit.accessory.id)
+        val reply = call("POST", "$base/api/characters/accessory", body, readTimeoutMs = 1200, connectTimeoutMs = 1000) ?: return null
+        return reply.first to appearance(reply.second)
+    }
+
     private fun register(base: String): Boolean {
         registered = call("POST", "$base/api/device/register", registration())?.first == 200
         return registered
@@ -170,11 +206,12 @@ class HubClient(context: Context, private val prefs: SharedPreferences) {
             .put("appVersion", BuildConfig.VERSION_NAME).put("settings", settings)
     }
 
-    private fun call(method: String, address: String, body: JSONObject?, readTimeoutMs: Int = 5000): Pair<Int, JSONObject>? {
+    private fun call(method: String, address: String, body: JSONObject?, readTimeoutMs: Int = 5000, connectTimeoutMs: Int = 3000): Pair<Int, JSONObject>? {
         var connection: HttpURLConnection? = null
         return try {
             connection = (URL(address).openConnection() as HttpURLConnection).apply {
-                requestMethod = method; connectTimeout = 3000; readTimeout = readTimeoutMs
+                requestMethod = method; connectTimeout = connectTimeoutMs; readTimeout = readTimeoutMs
+                if (method == "GET") { useCaches = false; setRequestProperty("Cache-Control", "no-cache") }
                 if (body != null) { doOutput = true; setRequestProperty("Content-Type", "application/json"); outputStream.use { it.write(body.toString().toByteArray()) } }
             }
             val code = connection.responseCode

@@ -11,6 +11,18 @@ import dev.hram.androsaur.delivery.WaitingNote
 import dev.hram.androsaur.face.Reflexes
 import dev.hram.androsaur.character.CharacterMode
 import dev.hram.androsaur.character.CharacterState
+import dev.hram.androsaur.character.CharacterId
+import dev.hram.androsaur.character.PersonalCharacter
+import dev.hram.androsaur.character.CharacterChoices
+import dev.hram.androsaur.character.AccessoryEdit
+import dev.hram.androsaur.character.CharacterAccessory
+import dev.hram.androsaur.character.PersonalAccessories
+import dev.hram.androsaur.character.hasAccessories
+import dev.hram.androsaur.character.supportsAccessory
+import dev.hram.androsaur.character.accessoryTarget
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.withTimeoutOrNull
+import java.util.concurrent.atomic.AtomicLong
 import dev.hram.androsaur.hub.HubSettings
 import dev.hram.androsaur.hub.WakePhraseSettings
 import dev.hram.androsaur.hub.Rename
@@ -41,6 +53,69 @@ class Brain(context: Context) {
     var characterMode by mutableStateOf(CharacterMode.restore(prefs.getString("character_mode", null))); private set
     private val characterState = MutableStateFlow(CharacterState())
     val character = characterState.asStateFlow()
+    var characterId by mutableStateOf(CharacterId.DINOSAUR); private set
+    private val personalCharacter = PersonalCharacter()
+    private val characterChoices = CharacterChoices(readCharacterAssignments())
+    @Volatile private var characterAssignments = characterChoices.values
+    private val characterRequest = AtomicLong()
+    private val refreshCharacters = Channel<Unit>(Channel.CONFLATED)
+    private val accessoryChoices = PersonalAccessories(readAccessoryValues(), readAccessoryEdits())
+    @Volatile private var accessoryAssignments = accessoryChoices.values
+
+    @Synchronized private fun acceptCharacters(request: Long, choices: Map<String, String>?, accessories: Map<String, Map<String, String>>? = null) {
+        if (!characterChoices.accept(request, choices)) return
+        characterAssignments = characterChoices.values
+        prefs.edit().putString("person_characters", JSONObject(characterAssignments).toString()).apply()
+        accessoryChoices.merge(accessories)
+        persistAccessories()
+    }
+
+    private fun readAccessoryValues(): Map<String, Map<String, String>> = runCatching {
+        val all = JSONObject(prefs.getString("person_accessories", "{}") ?: "{}")
+        all.keys().asSequence().associateWith { person ->
+            val row = all.getJSONObject(person)
+            row.keys().asSequence().associateWith { row.optString(it) }
+        }
+    }.getOrDefault(emptyMap())
+
+    private fun readAccessoryEdits(): List<AccessoryEdit> = runCatching {
+        val all = JSONArray(prefs.getString("pending_accessories", "[]") ?: "[]")
+        List(all.length()) { all.getJSONObject(it) }.mapNotNull { row ->
+            val person = row.optString("person")
+            val character = CharacterId.restore(row.optString("character"))
+            val accessory = CharacterAccessory.entries.firstOrNull { it.id == row.optString("accessory") }
+            if (person.isBlank() || !character.hasAccessories || accessory == null || !character.supportsAccessory(accessory)) null
+            else AccessoryEdit(person, character.id, accessory, row.optLong("revision", 1))
+        }
+    }.getOrDefault(emptyList())
+
+    /** Called under the Brain monitor; cache and pending queue must survive a restart together. */
+    private fun persistAccessories() {
+        accessoryAssignments = accessoryChoices.values
+        val pending = JSONArray()
+        for (edit in accessoryChoices.pending) pending.put(JSONObject().put("person", edit.person)
+            .put("character", edit.character).put("accessory", edit.accessory.id).put("revision", edit.revision))
+        prefs.edit().putString("person_accessories", JSONObject(accessoryAssignments).toString())
+            .putString("pending_accessories", pending.toString()).apply()
+    }
+
+    @Synchronized private fun nextAccessoryEdit(): AccessoryEdit? = accessoryChoices.pending.firstOrNull()
+
+    @Synchronized private fun finishAccessoryEdit(edit: AccessoryEdit) {
+        accessoryChoices.acknowledge(edit)
+        persistAccessories()
+    }
+
+    @Synchronized private fun setPersonalAccessory(person: String, character: CharacterId, accessory: CharacterAccessory) {
+        accessoryChoices.choose(person, character, accessory)
+        persistAccessories()
+        refreshCharacters.trySend(Unit)
+    }
+
+    private fun readCharacterAssignments(): Map<String, String> {
+        val json = runCatching { JSONObject(prefs.getString("person_characters", "{}") ?: "{}") }.getOrDefault(JSONObject())
+        return json.keys().asSequence().associateWith { json.optString(it) }
+    }
 
     fun chooseCharacterMode(mode: CharacterMode) {
         characterMode = mode
@@ -140,6 +215,7 @@ class Brain(context: Context) {
     /** The polling loop; call it from a background coroutine and cancel it when the screen goes away. */
     suspend fun run() = coroutineScope {
         launch { followCharacter() }
+        launch { followPersonalChoices() }
         launch { followMouth() }
         launch { deliverNotes() }
         launch { shareContext() }
@@ -154,11 +230,39 @@ class Brain(context: Context) {
     private suspend fun followCharacter() {
         while (true) {
             val now = SystemClock.elapsedRealtime()
+            personalCharacter.observe(badgeId, tracking && Reflexes.present(now, lastFaceAt), now)
+            characterId = personalCharacter.resolve(characterAssignments)
+            val accessory = CharacterAccessory.restore(accessoryAssignments[personalCharacter.person]?.get(characterId.id))
+                .takeIf { characterId.supportsAccessory(it) } ?: CharacterAccessory.NONE
             characterState.value = CharacterState.from(
                 expression(now), face?.let { Reflexes.gaze(it.first, it.second) } ?: (0.0 to 0.0),
                 speaking, mouth, mode, Reflexes.dimmed(now, lastActivityAt, dimAfterMs),
-            )
+            ).copy(accessory = accessory)
             delay(50)
+        }
+    }
+
+    /** Recognition requests a refresh immediately. While a face stays, edits arrive within one short poll. */
+    private suspend fun followPersonalChoices() {
+        while (true) {
+            withTimeoutOrNull(2_000) { refreshCharacters.receive() }
+            if (hub.url.isEmpty()) continue
+            val pending = nextAccessoryEdit()
+            if (pending != null) {
+                val write = characterRequest.incrementAndGet()
+                val reply = hub.setAccessory(pending)
+                if (reply?.first == 200 && reply.second != null) {
+                    val appearance = reply.second!!
+                    acceptCharacters(write, appearance.characters, appearance.accessories)
+                    finishAccessoryEdit(pending)
+                } else if (reply?.first == 409 || reply?.first == 422) {
+                    finishAccessoryEdit(pending)
+                    note = "Персонаж в хабе изменился; обновляю его внешний вид"
+                }
+            }
+            if (pending == null && (!tracking || !Reflexes.present(SystemClock.elapsedRealtime(), lastFaceAt))) continue
+            val request = characterRequest.incrementAndGet()
+            hub.characters()?.let { acceptCharacters(request, it.characters, it.accessories) }
         }
     }
 
@@ -186,7 +290,9 @@ class Brain(context: Context) {
         var done = emptyList<HubClient.Done>()
         while (true) {
             if (hub.url.isEmpty()) { hubState = "Хаб не задан"; delay(HUB_EVERY_MS); continue }
-            val result = hub.sync(cameraReport(), done)
+            val report = cameraReport()
+            val request = characterRequest.incrementAndGet()
+            val result = hub.sync(report, done)
             val reply = result.getOrNull()
             if (reply == null) {
                 hubState = "Хаб: ${result.exceptionOrNull()?.message} (${hub.url}), работаю на последних настройках"
@@ -201,6 +307,7 @@ class Brain(context: Context) {
                 val json = JSONObject(r.mapValues { JSONArray(it.value) }).toString()
                 if (json != prefs.getString("roles", "{}")) { prefs.edit().putString("roles", json).apply(); cameraPeople()?.let { sendPeople(it) } }
             }
+            acceptCharacters(request, reply.characters, reply.accessories)
             uploadNotes()
             done = reply.commands.map { HubClient.Done(it.id, execute(it)) }
             if (reply.upload.isNotEmpty()) uploadPeople(reply.upload)
@@ -404,6 +511,10 @@ class Brain(context: Context) {
                     say(Answers.timerSet(seconds))
                 }
                 "calc" -> Calculator.answer(data.optString("expression"))?.let { say(it) }
+                "character_glasses" -> changeAccessory(CharacterAccessory.GLASSES, data.optString("wear") == "true", data.optString("personId"))
+                "character_accessory" -> CharacterAccessory.entries.firstOrNull { it.id == data.optString("accessory") }?.let {
+                    changeAccessory(it, data.optString("wear") == "true", data.optString("personId"))
+                }
                 "timer_left" -> say(Answers.timerLeft(timerEndsAt?.let { ((it - System.currentTimeMillis()) / 1000).toInt() }))
                 // «Стоп» that silenced the bell needs no words; «стоп» while the timer only counts down switches it off.
                 "stop" -> if (data.optString("wasRinging") != "true" && timerEndsAt != null) { setTimer(null); say(Answers.TIMER_OFF) }
@@ -414,6 +525,52 @@ class Brain(context: Context) {
     private fun say(text: String) {
         val reply = audioClient.post("/speak", JSONObject().put("text", text))
         if (reply == null || reply.first != 200) note = "Не сказал: ${reply?.second?.optString("error") ?: "звук не отвечает"}"
+    }
+
+    private fun changeAccessory(requested: CharacterAccessory, wear: Boolean, commandPerson: String) {
+        val now = SystemClock.elapsedRealtime()
+        val person = badgeId?.takeIf { tracking && Reflexes.present(now, lastFaceAt) }
+        if (person == null || (commandPerson.isNotEmpty() && commandPerson != person)) {
+            say("Посмотри в камеру, чтобы я узнал тебя.")
+            return
+        }
+        val character = CharacterId.restore(characterAssignments[person])
+        if (!character.hasAccessories) {
+            say("У этого персонажа пока нет аксессуаров. Выбери Пуфа или Хомяка.")
+            return
+        }
+        if (!character.supportsAccessory(requested)) {
+            say(when (requested) {
+                CharacterAccessory.SCARF -> "Шарфик есть только у Пуфа."
+                CharacterAccessory.CROWN -> "Венок есть только у Пуфа."
+                CharacterAccessory.SEED -> "Семечку может взять только Хомяк."
+                else -> "У этого персонажа нет такого аксессуара."
+            })
+            return
+        }
+        val current = CharacterAccessory.restore(accessoryAssignments[person]?.get(character.id))
+        val target = accessoryTarget(current, requested, wear)
+        if (!wear && requested != CharacterAccessory.NONE && current != requested) {
+            say("Сейчас этого аксессуара нет.")
+            return
+        }
+        setPersonalAccessory(person, character, target)
+        say(if (characterMode == CharacterMode.SIMPLE) "Сохранил. Внешний вид персонажа виден в сложном режиме."
+            else if (wear) when (requested) {
+                CharacterAccessory.GLASSES -> "Надел очки."
+                CharacterAccessory.BOW -> "Надел бантик."
+                CharacterAccessory.SCARF -> "Повязал шарфик."
+                CharacterAccessory.CROWN -> "Надел венок."
+                CharacterAccessory.SEED -> "Взял семечку."
+                CharacterAccessory.NONE -> "Снял все аксессуары."
+            } else when (requested) {
+                CharacterAccessory.GLASSES -> "Снял очки."
+                CharacterAccessory.BOW -> "Снял бантик."
+                CharacterAccessory.SCARF -> "Снял шарфик."
+                CharacterAccessory.CROWN -> "Снял венок."
+                CharacterAccessory.SEED -> "Убрал семечку."
+                CharacterAccessory.NONE -> "Снял все аксессуары."
+            })
     }
 
     private suspend fun followWeather() {
@@ -696,6 +853,7 @@ class Brain(context: Context) {
         nextIdentifyAt = SystemClock.elapsedRealtime() + if (badge == UNKNOWN || recognizedAt == null) RETRY_IDENTIFY_MS else RECHECK_EVERY_MS
         val reply = cameraClient.post("/people/identify", JSONObject().put("ms", ms))
         if (reply == null || reply.first != 200) { note = "Опознание не началось: ${reply?.second?.optString("error") ?: "нет ответа"}"; return }
+        refreshCharacters.trySend(Unit)
         identifySince = SystemClock.elapsedRealtime(); identifyUntil = identifySince + ms + 300; sawStranger = false
     }
 
@@ -706,7 +864,12 @@ class Brain(context: Context) {
         // Only a result made after the wake word counts, not one left from earlier.
         if (who != null && who.optLong("ageMs", Long.MAX_VALUE) <= now - identifySince + 200) {
             val name = if (who.isNull("name")) null else who.optString("name")
-            if (name != null) { badge = name; badgeId = if (who.isNull("id")) null else who.optString("id").ifEmpty { null }; recognizedAt = now; identifyUntil = 0L; return }
+            if (name != null) {
+                badge = name; badgeId = if (who.isNull("id")) null else who.optString("id").ifEmpty { null }
+                recognizedAt = now; identifyUntil = 0L
+                refreshCharacters.trySend(Unit)
+                return
+            }
             sawStranger = true
         }
         if (now > identifyUntil) {

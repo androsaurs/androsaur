@@ -58,15 +58,36 @@ private object RiveRuntime {
     }
 }
 
-internal fun loadCharacterView(context: Context): RiveAnimationView {
+internal val CharacterId.resource: Int get() = when (this) {
+    CharacterId.DINOSAUR -> R.raw.androsaur_character
+    CharacterId.CAT -> R.raw.androsaur_cat
+    CharacterId.DOG -> R.raw.androsaur_dog
+    CharacterId.PUF -> R.raw.puf_character
+    CharacterId.HAMSTER -> R.raw.hamster_character
+}
+
+internal val CharacterId.artboardName: String get() = when (this) {
+    CharacterId.PUF -> "Пуф"
+    CharacterId.HAMSTER -> "Хомяк"
+    else -> "Androsaur"
+}
+
+internal val CharacterId.outfitCount: Int get() = when (this) {
+    CharacterId.PUF -> 5
+    CharacterId.HAMSTER -> 4
+    else -> 0
+}
+
+internal fun loadCharacterView(context: Context, character: CharacterId = CharacterId.DINOSAUR): RiveAnimationView {
     RiveRuntime.initialize(context)
     val view = CharacterRiveView(context)
     try {
-        view.setRiveResource(R.raw.androsaur_character, artboardName = "Androsaur", stateMachineName = MACHINE, autoplay = false)
-        val artboard = requireNotNull(view.controller.activeArtboard) { "Нет artboard Androsaur" }
+        view.setRiveResource(character.resource, artboardName = character.artboardName, stateMachineName = MACHINE, autoplay = false)
+        val artboard = requireNotNull(view.controller.activeArtboard) { "Нет artboard ${character.artboardName}" }
         val machine = artboard.stateMachine(MACHINE)
         // Validate the complete contract before a render thread can consume any input.
-        require(machine.inputNames.toSet() == INPUTS) { "Неверные параметры Character" }
+        val expected = INPUTS + if (character.outfitCount > 0) setOf("outfit") else emptySet()
+        require(machine.inputNames.toSet() == expected) { "Неверные параметры Character" }
         require(machine.inputs.all { it.isNumber }) { "Параметры Character должны быть числовыми" }
         // The artboard owns this inspection instance and releases it along with the file.
         return view
@@ -82,7 +103,8 @@ internal fun RiveCharacter(
     state: CharacterState,
     onError: (String?) -> Unit,
     modifier: Modifier = Modifier,
-    load: (Context) -> RiveAnimationView = ::loadCharacterView,
+    load: (Context) -> RiveAnimationView = { loadCharacterView(it) },
+    outfit: Int? = null,
 ) {
     val context = LocalContext.current
     val owner = LocalLifecycleOwner.current
@@ -110,13 +132,15 @@ internal fun RiveCharacter(
     val lookX by animateFloatAsState(state.lookX, tween(180), label = "rive lookX")
     val lookY by animateFloatAsState(state.lookY, tween(180), label = "rive lookY")
     val mouth by animateFloatAsState(state.mouthOpen, tween(70), label = "rive mouth")
-    val expression by animateFloatAsState(when (state.expression) {
+    // A category code, not a scale: the rig crossfades between expressions itself.
+    // Animating the number would pass through the codes in between.
+    val expression = when (state.expression) {
         Expression.NEUTRAL -> 0f
         Expression.ATTENTIVE -> 1f
         Expression.LISTENING -> 2f
         Expression.SLEEPY -> 3f
         Expression.SAD -> 4f
-    }, tween(300), label = "rive expression")
+    }
     val sleeping by animateFloatAsState(if (state.sleeping) 1f else 0f, tween(300), label = "rive sleeping")
     val currentSleeping by rememberUpdatedState(state.sleeping)
     val sent = remember(view) { mutableMapOf<String, Float>() }
@@ -159,7 +183,7 @@ internal fun RiveCharacter(
                         Interaction.IDLE -> 0f; Interaction.COMMAND -> 1f; Interaction.RECORDING -> 2f; Interaction.NOTE -> 3f
                     },
                     "speaking" to if (state.speaking) 1f else 0f, "sleeping" to sleeping,
-                )
+                ) + if (outfit != null) mapOf("outfit" to outfit.toFloat()) else emptyMap()
                 // Identical inputs must not wake a sleeping render loop on each clock tick.
                 for ((name, value) in values) if (sent[name] != value) {
                     it.setNumberState(MACHINE, name, value)
