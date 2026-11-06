@@ -14,6 +14,13 @@ class AnnounceTest {
         assertNotEquals("Передано.", others.first())
     }
 
+    @Test fun theSenderHearsWhatWasPassedOn() {
+        assertEquals("Передал на колонку Детская: «идите ужинать»", AnnounceAnswers.forStatus("spoken", "Детская", "идите ужинать"))
+        assertEquals("Передал на все колонки: «обед»", AnnounceAnswers.forStatus("spoken", "все колонки", " обед "))
+        assertEquals("Передано.", AnnounceAnswers.forStatus("spoken", "Детская", ""))
+        assertEquals("Не разобрал сообщение. Услышал: «мм». Скажи ещё раз.", AnnounceAnswers.forStatus("unclear", "Детская", "мм"))
+    }
+
     @Test fun anUnknownVerdictIsAFailureNotASuccess() {
         assertEquals("Не получилось передать на колонку.", AnnounceAnswers.forStatus("something_new"))
     }

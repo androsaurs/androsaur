@@ -159,9 +159,9 @@ class HubClient(context: Context, private val prefs: SharedPreferences) {
 
     /**
      * Hands the hub a message for the speaker of a room (WAV): it is written out and spoken there. Returns the hub's verdict
-     * (`spoken`, `unclear`, `no_groq`, `no_home`, `unknown_room`, `error`), or null when the hub did not answer.
+     * (`spoken`, `unclear`, `no_groq`, `no_home`, `unknown_room`, `error`) with what it made of the voice, or null when the hub did not answer.
      */
-    fun announce(roomId: String, from: String, fromId: String, wav: ByteArray): String? {
+    fun announce(roomId: String, from: String, fromId: String, wav: ByteArray): Pair<String, String?>? {
         val base = url.ifEmpty { return null }
         val q = "from=${java.net.URLEncoder.encode(from, "UTF-8")}&fromId=${java.net.URLEncoder.encode(fromId, "UTF-8")}"
         var connection: HttpURLConnection? = null
@@ -171,8 +171,9 @@ class HubClient(context: Context, private val prefs: SharedPreferences) {
                 setRequestProperty("Content-Type", "audio/wav")
                 outputStream.use { it.write(wav) }
             }
-            if (connection.responseCode != 200) return "error"
-            JSONObject(connection.inputStream.use { it.readBytes().toString(Charsets.UTF_8) }).optString("status").ifEmpty { "error" }
+            if (connection.responseCode != 200) return "error" to null
+            val reply = JSONObject(connection.inputStream.use { it.readBytes().toString(Charsets.UTF_8) })
+            reply.optString("status").ifEmpty { "error" } to reply.optString("text").takeIf { it.isNotEmpty() && !reply.isNull("text") }
         } catch (_: Exception) { null }
         finally { connection?.disconnect() }
     }

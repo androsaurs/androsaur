@@ -555,9 +555,9 @@ class Brain(context: Context) {
         val id = data.optString("announceId")
         val wav = audioClient.getBytes("/announce/audio?id=$id")
         if (wav == null) { say(AnnounceAnswers.forStatus("error")); return }
-        val status = hub.announce(data.optString("roomId"), data.optString("person"), data.optString("personId"), wav)
+        val reply = hub.announce(data.optString("roomId"), data.optString("person"), data.optString("personId"), wav)
         audioClient.post("/announce/delete", JSONObject().put("id", id))
-        say(AnnounceAnswers.forStatus(status))
+        say(AnnounceAnswers.forStatus(reply?.first, data.optString("room"), reply?.second))
     }
 
     private fun say(text: String) {
