@@ -14,7 +14,7 @@ object MorningHoroscope {
     fun parts(reading: DailyHoroscope?, person: String, nowMs: Long): List<String> {
         if (reading == null || !reading.greetingEnabled || !reading.usableFor(person, nowMs)) return emptyList()
         val result = mutableListOf<String>()
-        var rest = reading.spoken().trim()
+        var rest = "Твой гороскоп: ${reading.text}".trim()
         while (rest.length > 600) {
             val cut = rest.lastIndexOf(' ', 600).takeIf { it > 0 } ?: 600
             result += rest.substring(0, cut)

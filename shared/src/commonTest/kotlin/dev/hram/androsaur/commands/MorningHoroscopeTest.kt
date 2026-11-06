@@ -18,7 +18,8 @@ class MorningHoroscopeTest {
     }
 
     @Test fun noAdditionWithoutExplicitPermissionOrTodaysPersonalReading() {
-        assertEquals(listOf(reading.spoken()), MorningHoroscope.parts(reading, "katya", 2_000))
+        assertEquals(listOf("Твой гороскоп: Хороший день."), MorningHoroscope.parts(reading, "katya", 2_000))
+        assertEquals("Гороскоп на сегодня для знака Овен, по данным радио Европа Плюс. Хороший день.", reading.spoken())
         assertTrue(MorningHoroscope.parts(null, "katya", 2_000).isEmpty())
         assertTrue(MorningHoroscope.parts(reading.copy(greetingEnabled = false), "katya", 2_000).isEmpty())
         assertTrue(MorningHoroscope.parts(reading, "papa", 2_000).isEmpty())
@@ -38,7 +39,7 @@ class MorningHoroscopeTest {
         val parts = MorningHoroscope.parts(long, "katya", 2_000)
         assertTrue(parts.size > 1)
         assertTrue(parts.all { it.isNotBlank() && it.length <= 600 })
-        assertEquals(long.spoken(), parts.joinToString(" "))
-        assertEquals(1, parts.count { "Гороскоп на сегодня" in it })
+        assertEquals("Твой гороскоп: ${long.text}", parts.joinToString(" "))
+        assertEquals(1, parts.count { "Твой гороскоп:" in it })
     }
 }
