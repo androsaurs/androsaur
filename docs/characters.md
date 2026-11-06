@@ -42,6 +42,28 @@ SVG строится из тех же компонентов, трансформ
 node scripts/build-hamster-rig.mjs androidApp/src/main/res/raw/hamster_character.riv --preview=../androsaur-hub/app/static/characters/hamster.svg
 ```
 
+Пингвин — `penguin`, artboard «Пингвин», синий пингвинёнок с большой головой, оранжевыми лапками, светлой
+обводкой и мягким свечением, чтобы читаться на чёрном экране. Бинарный `penguin_character.riv` при добавлении
+совпал с исходником из патча (версия с треугольным клювом и перепончатыми лапами: в writer добавлен `outline` — замкнутый контур по точкам с закруглением углов). Контракт включает `outfit`: 0 без одежды, 1 шапка с помпоном, 2 наушники,
+3 шарф, 4 кепка, 5 толстовка. Все пять доступны голосом (см. таблицу ниже); хранимые ID — `bobble_hat`,
+`headphones`, `scarf`, `cap`, `hoodie`. Writer получил градиент, обводку и обрезку по контуру (`clip`), `svg()` их рисует.
+
+```sh
+node scripts/build-penguin-rig.mjs androidApp/src/main/res/raw/penguin_character.riv --preview=../androsaur-hub/app/static/characters/penguin.svg
+```
+
+Пингвин 2 — `penguin2`, второй вариант пингвина (выбирали между двумя, оставлены оба). Тот же artboard «Пингвин»,
+файл `penguin2_character.riv`, тот же контракт, `outfit` и наряды с теми же ID и командами, что у пингвина.
+Отличие в рисунке: настоящая анатомия — одно грушевидное тело без шеи, высокое яйцевидное белое брюшко, ласты-треугольники,
+клин-клюв и небольшие перепончатые лапы. Тело строится из гладких вершин (`{x, y, angle, dist}` в `outline`), поэтому
+риг создаётся с `reversePoints: true`: writer добавляет точки в обратном порядке, и Rive проходит их в заданном
+порядке. Бинарный файл совпал с исходником из патча. Предпросмотр `svg()` понимает гладкие вершины и обрезку
+по фигуре из любой ветки дерева.
+
+```sh
+node scripts/build-penguin2-rig.mjs androidApp/src/main/res/raw/penguin2_character.riv --preview=../androsaur-hub/app/static/characters/penguin2.svg
+```
+
 ### Все аксессуары (0.6-character-accessories)
 
 Голосовое управление всеми нарисованными аксессуарами требует главного приложения
@@ -50,10 +72,14 @@ node scripts/build-hamster-rig.mjs androidApp/src/main/res/raw/hamster_character
 | Команда | Пуф | Хомяк | Сохраняемый ID |
 | --- | --- | --- | --- |
 | «Надень бантик» / «надень бант» | outfit 4 | outfit 2 | bow |
-| «Надень шарфик» / «надень шарф» | outfit 1 | нет | scarf |
+| «Надень шарфик» / «надень шарф» | outfit 1 | нет | scarf (пингвин, outfit 3) |
 | «Надень венок» | outfit 2 | нет | crown |
 | «Возьми семечку» / «дай семечку» | нет | outfit 1 | seed |
 | «Надень очки» | outfit 3 | outfit 3 | glasses |
+| «Надень шапку» / «шапочку» / «колпак» | нет | нет | bobble_hat (пингвин, outfit 1) |
+| «Надень наушники» | нет | нет | headphones (пингвин, outfit 2) |
+| «Надень кепку» | нет | нет | cap (пингвин, outfit 4) |
+| «Надень толстовку» / «худи» | нет | нет | hoodie (пингвин, outfit 5) |
 | «Сними всё» / «сними все аксессуары» | outfit 0 | outfit 0 | none |
 
 Снятие конкретного предмета: «сними бантик», «сними шарф», «сними венок»,

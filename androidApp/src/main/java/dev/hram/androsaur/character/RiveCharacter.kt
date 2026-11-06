@@ -72,17 +72,21 @@ internal val CharacterId.resource: Int get() = when (this) {
     CharacterId.DOG -> R.raw.androsaur_dog
     CharacterId.PUF -> R.raw.puf_character
     CharacterId.HAMSTER -> R.raw.hamster_character
+    CharacterId.PENGUIN -> R.raw.penguin_character
+    CharacterId.PENGUIN2 -> R.raw.penguin2_character
 }
 
 internal val CharacterId.artboardName: String get() = when (this) {
     CharacterId.PUF -> "Пуф"
     CharacterId.HAMSTER -> "Хомяк"
+    CharacterId.PENGUIN, CharacterId.PENGUIN2 -> "Пингвин"
     else -> "Androsaur"
 }
 
 internal val CharacterId.outfitCount: Int get() = when (this) {
     CharacterId.PUF -> 5
     CharacterId.HAMSTER -> 4
+    CharacterId.PENGUIN, CharacterId.PENGUIN2 -> 5
     else -> 0
 }
 

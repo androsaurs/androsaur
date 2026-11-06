@@ -2,7 +2,7 @@ package dev.hram.androsaur.character
 
 enum class CharacterId(val id: String, val title: String) {
     DINOSAUR("dinosaur", "Динозаврик"), CAT("cat", "Кошечка"), DOG("dog", "Собачка"), PUF("puf", "Пуф"),
-    HAMSTER("hamster", "Хомяк");
+    HAMSTER("hamster", "Хомяк"), PENGUIN("penguin", "Пингвин"), PENGUIN2("penguin2", "Пингвин 2");
 
     companion object {
         fun restore(id: String?): CharacterId = entries.firstOrNull { it.id == id } ?: DINOSAUR

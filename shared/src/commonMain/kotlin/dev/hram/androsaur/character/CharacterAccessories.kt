@@ -1,16 +1,21 @@
 package dev.hram.androsaur.character
 
 enum class CharacterAccessory(val id: String) {
-    NONE("none"), GLASSES("glasses"), BOW("bow"), SCARF("scarf"), CROWN("crown"), SEED("seed");
+    NONE("none"), GLASSES("glasses"), BOW("bow"), SCARF("scarf"), CROWN("crown"), SEED("seed"),
+    BOBBLE_HAT("bobble_hat"), HEADPHONES("headphones"), CAP("cap"), HOODIE("hoodie");
     companion object {
         fun restore(id: String?): CharacterAccessory = entries.firstOrNull { it.id == id } ?: NONE
     }
 }
 
-val CharacterId.hasAccessories: Boolean get() = this == CharacterId.PUF || this == CharacterId.HAMSTER
+val CharacterId.hasAccessories: Boolean get() = this == CharacterId.PUF || this == CharacterId.HAMSTER || this == CharacterId.PENGUIN || this == CharacterId.PENGUIN2
 val CharacterId.supportedAccessories: Set<CharacterAccessory> get() = when (this) {
     CharacterId.PUF -> setOf(CharacterAccessory.NONE, CharacterAccessory.GLASSES, CharacterAccessory.BOW, CharacterAccessory.SCARF, CharacterAccessory.CROWN)
     CharacterId.HAMSTER -> setOf(CharacterAccessory.NONE, CharacterAccessory.GLASSES, CharacterAccessory.BOW, CharacterAccessory.SEED)
+    CharacterId.PENGUIN, CharacterId.PENGUIN2 -> setOf(
+        CharacterAccessory.NONE, CharacterAccessory.BOBBLE_HAT, CharacterAccessory.HEADPHONES,
+        CharacterAccessory.SCARF, CharacterAccessory.CAP, CharacterAccessory.HOODIE,
+    )
     else -> setOf(CharacterAccessory.NONE)
 }
 fun CharacterId.supportsAccessory(accessory: CharacterAccessory): Boolean = accessory in supportedAccessories
@@ -22,6 +27,11 @@ fun CharacterId.outfitCode(accessory: CharacterAccessory): Int = when (this) {
     CharacterId.HAMSTER -> when (accessory) {
         CharacterAccessory.SEED -> 1; CharacterAccessory.BOW -> 2
         CharacterAccessory.GLASSES -> 3; else -> 0
+    }
+    // The penguin rig's `outfit` input: 1 bobble hat, 2 headphones, 3 scarf, 4 cap, 5 hoodie.
+    CharacterId.PENGUIN, CharacterId.PENGUIN2 -> when (accessory) {
+        CharacterAccessory.BOBBLE_HAT -> 1; CharacterAccessory.HEADPHONES -> 2; CharacterAccessory.SCARF -> 3
+        CharacterAccessory.CAP -> 4; CharacterAccessory.HOODIE -> 5; else -> 0
     }
     else -> 0
 }

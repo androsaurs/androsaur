@@ -596,12 +596,16 @@ class Brain(context: Context) {
         }
         val character = CharacterId.restore(characterAssignments[person])
         if (!character.hasAccessories) {
-            say("У этого персонажа пока нет аксессуаров. Выбери Пуфа или Хомяка.")
+            say("У этого персонажа пока нет аксессуаров. Выбери Пуфа, Хомяка или Пингвина.")
             return
         }
         if (!character.supportsAccessory(requested)) {
             say(when (requested) {
-                CharacterAccessory.SCARF -> "Шарфик есть только у Пуфа."
+                CharacterAccessory.SCARF -> "Шарфик есть только у Пуфа и Пингвина."
+                CharacterAccessory.BOBBLE_HAT -> "Шапка с помпоном есть только у Пингвина."
+                CharacterAccessory.HEADPHONES -> "Наушники есть только у Пингвина."
+                CharacterAccessory.CAP -> "Кепка есть только у Пингвина."
+                CharacterAccessory.HOODIE -> "Толстовка есть только у Пингвина."
                 CharacterAccessory.CROWN -> "Венок есть только у Пуфа."
                 CharacterAccessory.SEED -> "Семечку может взять только Хомяк."
                 else -> "У этого персонажа нет такого аксессуара."
@@ -622,6 +626,10 @@ class Brain(context: Context) {
                 CharacterAccessory.SCARF -> "Повязал шарфик."
                 CharacterAccessory.CROWN -> "Надел венок."
                 CharacterAccessory.SEED -> "Взял семечку."
+                CharacterAccessory.BOBBLE_HAT -> "Надел шапку."
+                CharacterAccessory.HEADPHONES -> "Надел наушники."
+                CharacterAccessory.CAP -> "Надел кепку."
+                CharacterAccessory.HOODIE -> "Надел толстовку."
                 CharacterAccessory.NONE -> "Снял все аксессуары."
             } else when (requested) {
                 CharacterAccessory.GLASSES -> "Снял очки."
@@ -629,6 +637,10 @@ class Brain(context: Context) {
                 CharacterAccessory.SCARF -> "Снял шарфик."
                 CharacterAccessory.CROWN -> "Снял венок."
                 CharacterAccessory.SEED -> "Убрал семечку."
+                CharacterAccessory.BOBBLE_HAT -> "Снял шапку."
+                CharacterAccessory.HEADPHONES -> "Снял наушники."
+                CharacterAccessory.CAP -> "Снял кепку."
+                CharacterAccessory.HOODIE -> "Снял толстовку."
                 CharacterAccessory.NONE -> "Снял все аксессуары."
             })
     }

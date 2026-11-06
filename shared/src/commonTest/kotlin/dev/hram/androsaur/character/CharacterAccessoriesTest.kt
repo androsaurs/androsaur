@@ -78,4 +78,27 @@ class CharacterAccessoriesTest {
         assertEquals(CharacterAccessory.GLASSES, choices.forPerson("katya", CharacterId.PUF))
         assertEquals(2, choices.pending.size)
     }
+
+    @Test fun penguinHasEveryOutfitOfItsRig() {
+        val codes = listOf(
+            CharacterAccessory.NONE to 0, CharacterAccessory.BOBBLE_HAT to 1, CharacterAccessory.HEADPHONES to 2,
+            CharacterAccessory.SCARF to 3, CharacterAccessory.CAP to 4, CharacterAccessory.HOODIE to 5,
+        )
+        for ((accessory, code) in codes) {
+            assertEquals(code, CharacterId.PENGUIN.outfitCode(accessory), accessory.id)
+            assertEquals(true, CharacterId.PENGUIN.supportsAccessory(accessory), accessory.id)
+        }
+        assertEquals(CharacterId.PENGUIN, CharacterId.restore("penguin"))
+        // The second penguin has the same rig contract and the same outfits.
+        assertEquals(CharacterId.PENGUIN2, CharacterId.restore("penguin2"))
+        for ((accessory, code) in codes) assertEquals(code, CharacterId.PENGUIN2.outfitCode(accessory), accessory.id)
+        assertEquals(true, CharacterId.PENGUIN2.hasAccessories)
+        assertEquals(CharacterAccessory.HOODIE, CharacterAccessory.restore("hoodie"))
+        for (other in listOf(CharacterAccessory.GLASSES, CharacterAccessory.BOW, CharacterAccessory.CROWN, CharacterAccessory.SEED))
+            assertEquals(false, CharacterId.PENGUIN.supportsAccessory(other), other.id)
+        // Their outfits are the penguin's only.
+        for (id in CharacterId.entries.filter { it != CharacterId.PENGUIN && it != CharacterId.PENGUIN2 })
+            for (hat in listOf(CharacterAccessory.BOBBLE_HAT, CharacterAccessory.HEADPHONES, CharacterAccessory.CAP, CharacterAccessory.HOODIE))
+                assertEquals(false, id.supportsAccessory(hat), "${id.id} ${hat.id}")
+    }
 }
