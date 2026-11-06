@@ -75,6 +75,8 @@ class HubClient(context: Context, private val prefs: SharedPreferences) {
         val roles: Map<String, List<String>>? = null,
         val characters: Map<String, String>? = null,
         val accessories: Map<String, Map<String, String>>? = null,
+        /** Rooms with speakers (id, name, words) for «передай в детскую»; null — the hub did not send them, keep the last ones. */
+        val rooms: JSONArray? = null,
     )
 
     /** Whom the camera knows, for the hub: [people] are objects with id, name, samples and digest (no sets); [faceModel] is the camera's face model. */
@@ -126,9 +128,10 @@ class HubClient(context: Context, private val prefs: SharedPreferences) {
             obj.keys().asSequence().associateWith { obj.optString(it) }
         }
         val accessories = parseAccessories(body)
-        if (config.toString() == stored().toString()) return Result.success(Reply(null, commands, peopleRev, upload, place, weather, texts, roles, characters, accessories))
+        val rooms = body.optJSONArray("rooms")
+        if (config.toString() == stored().toString()) return Result.success(Reply(null, commands, peopleRev, upload, place, weather, texts, roles, characters, accessories, rooms))
         prefs.edit().putString(KEY_CONFIG, config.toString()).apply()
-        return Result.success(Reply(config, commands, peopleRev, upload, place, weather, texts, roles, characters, accessories))
+        return Result.success(Reply(config, commands, peopleRev, upload, place, weather, texts, roles, characters, accessories, rooms))
     }
 
     /** Hands the hub the sets of the people it asked for (the camera's export, filtered). The sets are never logged. */
@@ -151,6 +154,26 @@ class HubClient(context: Context, private val prefs: SharedPreferences) {
             }
             connection.responseCode in 200..201
         } catch (_: Exception) { false }
+        finally { connection?.disconnect() }
+    }
+
+    /**
+     * Hands the hub a message for the speaker of a room (WAV): it is written out and spoken there. Returns the hub's verdict
+     * (`spoken`, `unclear`, `no_groq`, `no_home`, `unknown_room`, `error`), or null when the hub did not answer.
+     */
+    fun announce(roomId: String, from: String, fromId: String, wav: ByteArray): String? {
+        val base = url.ifEmpty { return null }
+        val q = "from=${java.net.URLEncoder.encode(from, "UTF-8")}&fromId=${java.net.URLEncoder.encode(fromId, "UTF-8")}"
+        var connection: HttpURLConnection? = null
+        return try {
+            connection = (URL("$base/api/device/announce/${java.net.URLEncoder.encode(roomId, "UTF-8")}?$q").openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"; connectTimeout = 3000; readTimeout = 30_000; doOutput = true
+                setRequestProperty("Content-Type", "audio/wav")
+                outputStream.use { it.write(wav) }
+            }
+            if (connection.responseCode != 200) return "error"
+            JSONObject(connection.inputStream.use { it.readBytes().toString(Charsets.UTF_8) }).optString("status").ifEmpty { "error" }
+        } catch (_: Exception) { null }
         finally { connection?.disconnect() }
     }
 

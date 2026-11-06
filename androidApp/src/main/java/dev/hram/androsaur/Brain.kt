@@ -27,6 +27,7 @@ import dev.hram.androsaur.hub.HubSettings
 import dev.hram.androsaur.hub.WakePhraseSettings
 import dev.hram.androsaur.hub.Rename
 import dev.hram.androsaur.commands.Answers
+import dev.hram.androsaur.commands.AnnounceAnswers
 import dev.hram.androsaur.commands.Calculator
 import dev.hram.androsaur.commands.HoroscopeAnswers
 import dev.hram.androsaur.commands.MorningHoroscope
@@ -314,6 +315,7 @@ class Brain(context: Context) {
                 val json = JSONObject(r.mapValues { JSONArray(it.value) }).toString()
                 if (json != prefs.getString("roles", "{}")) { prefs.edit().putString("roles", json).apply(); cameraPeople()?.let { sendPeople(it) } }
             }
+            reply.rooms?.let { applyRooms(it) }
             acceptCharacters(request, reply.characters, reply.accessories)
             uploadNotes()
             done = reply.commands.map { HubClient.Done(it.id, execute(it)) }
@@ -528,6 +530,7 @@ class Brain(context: Context) {
                 "character_accessory" -> CharacterAccessory.entries.firstOrNull { it.id == data.optString("accessory") }?.let {
                     changeAccessory(it, data.optString("wear") == "true", data.optString("personId"))
                 }
+                "announce" -> launch { announce(data) }
                 "timer_left" -> say(Answers.timerLeft(timerEndsAt?.let { ((it - System.currentTimeMillis()) / 1000).toInt() }))
                 // «Стоп» that silenced the bell needs no words; «стоп» while the timer only counts down switches it off.
                 "stop" -> {
@@ -536,6 +539,25 @@ class Brain(context: Context) {
                 }
             }
         }
+    }
+
+    @Volatile private var roomsPushed: String? = null
+
+    /** Gives the audio module the rooms with speakers when they changed (it keeps them itself between runs). */
+    private fun applyRooms(rooms: JSONArray) {
+        val json = rooms.toString()
+        if (json == roomsPushed) return
+        if (audioClient.post("/rooms", JSONObject().put("rooms", rooms))?.first == 200) roomsPushed = json
+    }
+
+    /** «Передай в детскую…» was recorded by the audio module: the hub writes it out and speaks it on the room's speaker; says how it went. */
+    private fun announce(data: JSONObject) {
+        val id = data.optString("announceId")
+        val wav = audioClient.getBytes("/announce/audio?id=$id")
+        if (wav == null) { say(AnnounceAnswers.forStatus("error")); return }
+        val status = hub.announce(data.optString("roomId"), data.optString("person"), data.optString("personId"), wav)
+        audioClient.post("/announce/delete", JSONObject().put("id", id))
+        say(AnnounceAnswers.forStatus(status))
     }
 
     private fun say(text: String) {
