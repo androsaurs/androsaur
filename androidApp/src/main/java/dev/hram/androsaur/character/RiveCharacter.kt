@@ -38,12 +38,20 @@ private class CharacterRiveView(context: Context) : RiveAnimationView(context) {
     @SuppressLint("ClickableViewAccessibility") // No gestures here; the accessible Compose parent owns the click.
     override fun onTouchEvent(event: MotionEvent): Boolean = false
 
+    override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
+        super.onSurfaceTextureAvailable(surface, width, height)
+        Log.d("AndrosaurCharacter", "Surface available ${width}x$height, drawable=${controller.isActive}")
+        // A sleeping machine is paused, but a new texture still needs its static artboard.
+        if (controller.isActive) artboardRenderer?.start()
+    }
+
     @SuppressLint("MissingSuperCall")
     override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
         // Rive's default callback recreates/releases Surface before its render thread has
         // finished unlockCanvasAndPost (crashes on Android 15). TextureView resizes the
         // existing SurfaceTexture itself; keep its Surface alive and update only layout.
         controller.targetBounds = RectF(0f, 0f, width.toFloat(), height.toFloat())
+        if (controller.isActive) artboardRenderer?.start()
     }
 }
 
@@ -142,34 +150,30 @@ internal fun RiveCharacter(
         Expression.SAD -> 4f
     }
     val sleeping by animateFloatAsState(if (state.sleeping) 1f else 0f, tween(300), label = "rive sleeping")
-    val currentSleeping by rememberUpdatedState(state.sleeping)
+    var visible by remember(owner) { mutableStateOf(owner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) }
     val sent = remember(view) { mutableMapOf<String, Float>() }
     // Stop rendering outside the visible Activity. RiveAnimationView itself only frees on destroy.
     DisposableEffect(view, owner) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_STOP -> { view.pause(); view.controller.isActive = false }
-                Lifecycle.Event.ON_START -> {
-                    view.controller.isActive = !currentSleeping
-                    if (!currentSleeping) view.play(MACHINE, isStateMachine = true)
-                }
+                Lifecycle.Event.ON_STOP -> { visible = false; view.pause(); view.controller.isActive = false }
+                Lifecycle.Event.ON_START -> { visible = true }
                 else -> Unit
             }
         }
         owner.lifecycle.addObserver(observer)
         onDispose { owner.lifecycle.removeObserver(observer); view.pause() }
     }
-    LaunchedEffect(view, state.sleeping) {
-        if (state.sleeping) {
-            delay(450)
-            view.pause()
-            // Pending native input work may otherwise restart a paused state machine.
-            view.controller.isActive = false
-            view.artboardRenderer?.stop()
-        } else if (owner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
-            view.controller.isActive = true
-            view.play(MACHINE, isStateMachine = true)
-        }
+    LaunchedEffect(view, state.sleeping, visible) {
+        if (!visible) return@LaunchedEffect
+        view.controller.isActive = true
+        view.play(MACHINE, isStateMachine = true)
+        if (!state.sleeping) return@LaunchedEffect
+        delay(450)
+        // Pause motion, not drawing. Rive clears the canvas before draw(); setting isActive=false
+        // skips the artboard on a later queued frame and leaves the character completely blank.
+        view.pause()
+        Log.d("AndrosaurCharacter", "Sleeping pose paused, artboard remains drawable")
     }
     AndroidView(
         factory = { view }, modifier = modifier.testTag("character-rive"),

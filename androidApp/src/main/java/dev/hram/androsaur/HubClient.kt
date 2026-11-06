@@ -196,18 +196,26 @@ class HubClient(context: Context, private val prefs: SharedPreferences) {
     }
 
     /** Ask the current provider for this person's current sign. Only today's success is cached. */
-    fun horoscope(person: String): Pair<String, DailyHoroscope?> {
+    fun horoscope(person: String, forGreeting: Boolean = false): Pair<String, DailyHoroscope?> {
         val base = url
         val cacheKey = "horoscope:$base:$person"
+        val greetingKey = "horoscope_greeting:$base:$person"
         fun reading(body: JSONObject?): DailyHoroscope? = body?.takeIf { it.optString("status") == "ok" }?.let {
             DailyHoroscope(it.optString("person"), it.optString("sign"), it.optString("sign_name"),
                 it.optString("text"), it.optString("source_name"), it.optLong("fetched_at_ms"), it.optLong("valid_until_ms"),
-                it.optString("source_speech_name").takeIf { name -> name.isNotBlank() && name != "null" } ?: it.optString("source_name"))
+                it.optString("source_speech_name").takeIf { name -> name.isNotBlank() && name != "null" } ?: it.optString("source_name"),
+                it.optBoolean("greeting_enabled", false))
                 .takeIf { value -> value.usableFor(person, System.currentTimeMillis()) }
         }
-        val reply = if (base.isEmpty()) null else call("POST", "$base/api/horoscope", JSONObject().put("person", person), readTimeoutMs = 8000)
+        val reply = if (base.isEmpty()) null else call("POST", "$base/api/horoscope",
+            JSONObject().put("person", person).put("for_greeting", forGreeting),
+            readTimeoutMs = if (forGreeting) 7000 else 8000, connectTimeoutMs = if (forGreeting) 1000 else 3000)
         if (reply?.first == 200) {
             val body = reply.second
+            val allowed = body.optBoolean("greeting_enabled", false)
+            prefs.edit().putBoolean(greetingKey, allowed).apply()
+            // Opting out affects automatic delivery only; retain the command's cached forecast.
+            if (forGreeting && !allowed) return "greeting_disabled" to null
             val value = reading(body)
             if (value != null) {
                 prefs.edit().putString(cacheKey, body.toString()).apply()
@@ -218,6 +226,7 @@ class HubClient(context: Context, private val prefs: SharedPreferences) {
             return body.optString("status").takeIf { it != "ok" }.orEmpty() to null
         }
         val cached = runCatching { JSONObject(prefs.getString(cacheKey, "{}") ?: "{}") }.getOrNull()
+        if (forGreeting && !prefs.getBoolean(greetingKey, false)) return "greeting_disabled" to null
         reading(cached)?.let { return "ok" to it }
         prefs.edit().remove(cacheKey).apply()
         return (if (base.isEmpty()) "hub_missing" else "unavailable") to null

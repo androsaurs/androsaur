@@ -29,6 +29,8 @@ import dev.hram.androsaur.hub.Rename
 import dev.hram.androsaur.commands.Answers
 import dev.hram.androsaur.commands.Calculator
 import dev.hram.androsaur.commands.HoroscopeAnswers
+import dev.hram.androsaur.commands.MorningHoroscope
+import kotlinx.coroutines.async
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -167,7 +169,8 @@ class Brain(context: Context) {
     private var audioBoot = ""
 
     /** A touch on the face: the person is here; a ringing timer is silenced (done on the timer's thread, not the screen's). */
-    fun touch() { lastActivityAt = SystemClock.elapsedRealtime(); if (ringing) stopRingRequested = true }
+    private val greetingInterrupt = AtomicLong()
+    fun touch() { greetingInterrupt.incrementAndGet(); lastActivityAt = SystemClock.elapsedRealtime(); if (ringing) stopRingRequested = true }
 
     /** When the timer rings, wall clock ms; null when none is set. Kept in the preferences, so a restart does not lose it. */
     var timerEndsAt by mutableStateOf(prefs.getLong("timer_ends_at", 0L).takeIf { it > 0 }); private set
@@ -493,6 +496,7 @@ class Brain(context: Context) {
             if (stopRingRequested) { stopRingRequested = false; audioClient.post("/ring/stop", JSONObject()) }
             val ends = timerEndsAt
             if (ends != null && System.currentTimeMillis() >= ends) {
+                greetingInterrupt.incrementAndGet()
                 setTimer(null)
                 // A timer that ran out long ago (the phone was off) is no use ringing now.
                 if (System.currentTimeMillis() - ends > 10 * 60_000L) continue
@@ -663,12 +667,14 @@ class Brain(context: Context) {
      * К вечеру небольшой дождь, возьми зонт.» Once a day per permanent id (kept in the preferences, so a restart does not greet
      * again); waits until it has been said, so the notes come after it. Returns whether it greeted.
      */
-    private suspend fun greet(personId: String, name: String): Boolean {
+    private suspend fun greet(personId: String, name: String): Boolean = coroutineScope {
         val zone = java.time.ZoneId.systemDefault()
         val now = java.time.ZonedDateTime.now(zone)
         val today = now.toLocalDate().toString()
         val greeted = runCatching { JSONObject(prefs.getString("greeted", "{}") ?: "{}") }.getOrDefault(JSONObject())
-        if (!greetingOn || !Greeting.due(greeted.optString(personId).ifEmpty { null }, today)) return false
+        val lastGreeted = greeted.optString(personId).ifEmpty { null }
+        if (!greetingOn || !Greeting.due(lastGreeted, today)) return@coroutineScope false
+        val token = greetingInterrupt.get()
         val shown = weather
         val later = shown?.laterTimeMs?.let { at ->
             val time = java.time.Instant.ofEpochMilli(at).atZone(zone)
@@ -676,14 +682,52 @@ class Brain(context: Context) {
         }
         val text = Greeting.text(name, now.hour, shown, System.currentTimeMillis(), later)
         val reply = audioClient.post("/speak", JSONObject().put("text", text))
-        if (reply == null || reply.first != 200) return false
+        if (reply == null || reply.first != 200) return@coroutineScope false
         // Marked as soon as it started: a greeting cut short is not repeated all day.
         prefs.edit().putString("greeted", greeted.put(personId, today).toString()).apply()
         note = "Приветствие: $name"
-        delay(500)
-        val until = SystemClock.elapsedRealtime() + 20_000
-        while (speaking && SystemClock.elapsedRealtime() < until) delay(250)
-        return true
+        // Fetch while the weather is spoken; a slow/down hub never delays the greeting itself.
+        val forecast = if (MorningHoroscope.due(greetingOn, lastGreeted, today, now.hour))
+            async(kotlinx.coroutines.Dispatchers.IO) { hub.horoscope(personId, forGreeting = true).second }
+            else null
+        if (!waitForGreeting(personId, token)) {
+            forecast?.cancel()
+            return@coroutineScope true
+        }
+        val reading = forecast?.await()
+        val at = java.time.ZonedDateTime.now(zone)
+        if (at.toLocalDate().toString() != today || at.hour !in 5..11) return@coroutineScope true
+        for (part in MorningHoroscope.parts(reading, personId, System.currentTimeMillis())) {
+            if (!greetingStillFor(personId, token)) break
+            val started = audioClient.post("/speak", JSONObject().put("text", part))
+            if (started?.first == 200) note = "Гороскоп в приветствии: $name"
+            if (started?.first != 200 || !waitForGreeting(personId, token)) break
+        }
+        true
+    }
+
+    private fun greetingStillFor(personId: String, token: Long): Boolean = MorningHoroscope.stillFor(
+        personId, badgeId, tracking && Reflexes.present(SystemClock.elapsedRealtime(), lastFaceAt),
+        interrupted = token != greetingInterrupt.get() || !greetingOn || mode.isNotEmpty() || ringing,
+    )
+
+    /** Wait for the actual audio module, keeping notes and subsequent parts behind the greeting. */
+    private suspend fun waitForGreeting(personId: String, token: Long): Boolean {
+        val began = SystemClock.elapsedRealtime()
+        var started = false
+        while (SystemClock.elapsedRealtime() - began < 90_000) {
+            delay(250)
+            if (!greetingStillFor(personId, token)) {
+                // A new user command owns the speaker now. Only stop our own speech on departure.
+                if (token == greetingInterrupt.get() && mode.isEmpty()) audioClient.post("/speak/stop", JSONObject())
+                return false
+            }
+            val state = audioClient.get("/speech")?.takeIf { it.first == 200 }?.second ?: return false
+            if (state.optBoolean("speaking")) started = true
+            else if (started) return true
+            else if (SystemClock.elapsedRealtime() - began > 1500) return false
+        }
+        return false
     }
 
     private fun applyConfig(config: JSONObject): Long =
@@ -737,8 +781,11 @@ class Brain(context: Context) {
             val name = badge.takeIf { it.isNotEmpty() && it != UNKNOWN && Reflexes.badgeVisible(now, recognizedAt, lastFaceAt) }
             if (name == null) { if (lastName.isNotEmpty() && !Reflexes.present(now, lastFaceAt)) { gate.left(lastName); lastName = "" }; continue }
             lastName = name
-            if (!audio.running || speaking || mode.isNotEmpty()) continue
-            badgeId?.let { id -> if (greet(id, name)) lastActivityAt = SystemClock.elapsedRealtime() }
+            if (!audio.running || speaking || mode.isNotEmpty() || ringing) continue
+            val personBeforeGreeting = badgeId
+            personBeforeGreeting?.let { id -> if (greet(id, name)) lastActivityAt = SystemClock.elapsedRealtime() }
+            if (badgeId != personBeforeGreeting || badgeText(SystemClock.elapsedRealtime()) != name ||
+                speaking || mode.isNotEmpty() || ringing) continue
             if (!gate.shouldCheck(name, now)) continue
             val list = audioClient.get("/notes?pending=1")?.second?.optJSONArray("notes") ?: continue
             val waiting = List(list.length()) { list.getJSONObject(it).let { n ->
@@ -856,11 +903,12 @@ class Brain(context: Context) {
             val e = list.getJSONObject(i)
             lastEventId = maxOf(lastEventId, e.optLong("id"))
             when (e.optString("type")) {
-                "command" -> e.optJSONObject("data")?.let { d -> commands.add(d.optString("intent") to d) }
+                "command" -> e.optJSONObject("data")?.let { d -> greetingInterrupt.incrementAndGet(); commands.add(d.optString("intent") to d) }
                 "ring_started" -> { ringing = true; lastActivityAt = SystemClock.elapsedRealtime() }
                 "ring_stopped" -> ringing = false
             }
             if (e.optString("type") == "wake_word") {
+                greetingInterrupt.incrementAndGet()
                 lastWakeAt = SystemClock.elapsedRealtime(); lastActivityAt = lastWakeAt!!
                 wakeText = e.optJSONObject("data")?.optString("heard").orEmpty()
                 startIdentify()

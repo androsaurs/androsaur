@@ -161,7 +161,7 @@ private fun Clock(now: Long, compact: Boolean, weather: WeatherReading?, timerEn
             val columns = WeatherStrip.columns(weather, nowMs, zoneOffsetMs = java.util.TimeZone.getDefault().getOffset(nowMs).toLong())
             // A tap on the weather opens the forecast by the hour (and does not toggle the panel, as a tap elsewhere does).
             val tap = Modifier.clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null, onClick = onWeather)
-            if (columns.size >= 2 && nowMs - weather.fetchedAtMs < WeatherChoice.STALE_MS) WeatherStripView(columns, Modifier.padding(top = 28.dp).then(tap))
+            if (columns.size >= 2 && WeatherChoice.forecastFresh(weather, nowMs)) WeatherStripView(columns, Modifier.padding(top = 28.dp).then(tap))
             else Text(WeatherText.line(weather, nowMs), color = Color.White.copy(alpha = 0.55f), fontSize = 20.sp, modifier = Modifier.padding(top = 12.dp).then(tap))
         }
         // The timer: the countdown while it runs, «Время вышло» while the bell rings (a touch on the screen silences it).

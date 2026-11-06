@@ -10,6 +10,7 @@ data class DailyHoroscope(
     val fetchedAtMs: Long,
     val validUntilMs: Long,
     val sourceSpeechName: String = sourceName,
+    val greetingEnabled: Boolean = false,
 ) {
     fun usableFor(person: String, nowMs: Long): Boolean =
         this.person == person && sign.isNotBlank() && signName.isNotBlank() && text.isNotBlank() &&

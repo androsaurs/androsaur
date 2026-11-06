@@ -86,6 +86,11 @@ object WeatherChoice {
     fun hubFresh(hub: WeatherReading, nowMs: Long): Boolean =
         nowMs < (hub.validUntilMs?.coerceAtMost(hub.fetchedAtMs + 6 * 3_600_000L) ?: (hub.fetchedAtMs + HUB_FRESH_MS))
 
+    /** Keep the hourly graph during the hub's refresh interval and its stated grace period. */
+    fun forecastFresh(reading: WeatherReading, nowMs: Long): Boolean =
+        nowMs - reading.fetchedAtMs < STALE_MS ||
+            (reading.validUntilMs != null && hubFresh(reading, nowMs))
+
     /** What to show: the hub's weather while it is fresh, otherwise the newer of the two; nothing older than [DROP_MS]. */
     fun show(hub: WeatherReading?, own: WeatherReading?, nowMs: Long): WeatherReading? {
         if (hub != null && hubFresh(hub, nowMs)) return hub

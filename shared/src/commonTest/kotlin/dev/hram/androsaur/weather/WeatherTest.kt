@@ -83,6 +83,24 @@ class WeatherTest {
         assertEquals("град", WeatherText.describe("hail"))
     }
 
+    @Test fun graphDoesNotDisappearAtTwoHoursWhileTheHubForecastIsStillValid() {
+        val fetched = 10 * hour
+        val expires = fetched + 2 * hour + 15 * 60_000
+        val yandex = reading(fetched).copy(validUntilMs = expires)
+        assertTrue(WeatherChoice.forecastFresh(yandex, fetched + 2 * hour))
+        assertTrue(WeatherChoice.forecastFresh(yandex, expires - 1))
+        assertFalse(WeatherChoice.forecastFresh(yandex, expires))
+    }
+
+    @Test fun graphWithoutAnExplicitValidityKeepsItsTwoHourLimitAndHubValidityIsBounded() {
+        val fetched = 10 * hour
+        assertTrue(WeatherChoice.forecastFresh(reading(fetched), fetched + 2 * hour - 1))
+        assertFalse(WeatherChoice.forecastFresh(reading(fetched), fetched + 2 * hour))
+        val tooLong = reading(fetched).copy(validUntilMs = fetched + 100 * hour)
+        assertTrue(WeatherChoice.forecastFresh(tooLong, fetched + 6 * hour - 1))
+        assertFalse(WeatherChoice.forecastFresh(tooLong, fetched + 6 * hour))
+    }
+
     @Test fun theStripShowsNowAndThenEveryThreeHours() {
         val h = hour
         val now = 999 * h + 20 * 60_000          // 999 h is a multiple of 3 h, plus 20 minutes

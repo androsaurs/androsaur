@@ -26,6 +26,45 @@ class CharacterRenderingTest {
         return data.count { it == color }.also { bitmap.recycle() }
     }
 
+    private fun coloredPixels(bitmap: Bitmap?): Int {
+        if (bitmap == null) return 0
+        val data = IntArray(bitmap.width * bitmap.height)
+        bitmap.getPixels(data, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+        return data.count { (it ushr 24) > 0 && (it and 0xffffff) != 0 }.also { bitmap.recycle() }
+    }
+
+    @Test fun sleepingCharacterSurvivesAnExtraRenderAndResize() {
+        var view: RiveAnimationView? = null
+        val state = mutableStateOf(CharacterState())
+        val height = mutableStateOf(600.dp)
+        val loader: (Context) -> RiveAnimationView = { loadCharacterView(it).also { view = it } }
+        ui.setContent { RiveCharacter(state.value, {}, Modifier.fillMaxWidth().height(height.value), load = loader) }
+        ui.waitUntil(10_000) {
+            var colored = 0
+            ui.runOnIdle { colored = coloredPixels(view?.bitmap) }
+            colored > 2000
+        }
+        ui.runOnIdle { state.value = CharacterState(expression = Expression.SLEEPY, dimmed = true) }
+        ui.mainClock.advanceTimeBy(700)
+        ui.waitUntil(5_000) { view?.artboardRenderer?.isPlaying == false }
+        // Reproduce a queued redraw after the sleep timer paused the machine.
+        // With controller.isActive=false, native draw clears the surface and skips the artboard.
+        ui.runOnIdle { view!!.artboardRenderer!!.start() }
+        Thread.sleep(400)
+        ui.runOnIdle {
+            assertTrue("Sleeping character was cleared by an extra render", coloredPixels(view?.bitmap) > 2000)
+        }
+        for (size in listOf(450, 700, 600)) {
+            ui.runOnIdle { height.value = size.dp }
+            ui.waitForIdle()
+            ui.waitUntil(5_000) {
+                var colored = 0
+                ui.runOnIdle { colored = coloredPixels(view?.bitmap) }
+                colored > 2000
+            }
+        }
+    }
+
     @Test fun pufRendersAndHisMouthOpensWhenSpeaking() {
         checkSpeakingRig(CharacterId.PUF, 0xff3a2a5c.toInt())
     }
@@ -104,7 +143,7 @@ class CharacterRenderingTest {
         ui.runOnIdle { assertTrue(view?.controller?.isActive == true) }
         ui.runOnIdle { state.value = CharacterState(expression = Expression.SLEEPY, dimmed = true) }
         ui.mainClock.advanceTimeBy(700)
-        ui.waitUntil(5_000) { !view!!.controller.isActive && view!!.artboardRenderer?.isPlaying == false }
+        ui.waitUntil(5_000) { view!!.controller.isActive && view!!.artboardRenderer?.isPlaying == false }
         ui.runOnIdle { state.value = CharacterState() }
         ui.waitUntil(5_000) { view!!.controller.isActive && view!!.controller.playingStateMachines.isNotEmpty() }
         // Resizing must retain the live Surface while its rendering thread finishes a frame.
