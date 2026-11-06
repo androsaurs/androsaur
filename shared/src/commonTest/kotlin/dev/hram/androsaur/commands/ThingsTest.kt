@@ -13,6 +13,13 @@ class ThingsTest {
         assertEquals("Не нашёл: пылесос. Скажи «запомни», и я запишу.", ThingAnswers.forReply(ThingReply("not_found", "пылесос")))
     }
 
+    @Test fun forgettingNamesWhatWasPutAsideOrAsksToBeMoreExact() {
+        assertEquals("Забыл: купить макароны.", ThingAnswers.forReply(ThingReply("forgotten", "купить макароны")))
+        assertEquals("Таких записей несколько: купить макароны; макароны в ящике. Скажи точнее.",
+            ThingAnswers.forReply(ThingReply("ambiguous", "купить макароны; макароны в ящике")))
+        assertEquals("Нечего забывать: доктора.", ThingAnswers.forReply(ThingReply("nothing_to_forget", "доктора")))
+    }
+
     @Test fun noMemoryAndNoHubAreTheSameWordsAndAnUnknownVerdictIsAFailure() {
         assertEquals("Память недоступна.", ThingAnswers.forReply(null))
         assertEquals(ThingAnswers.forReply(null), ThingAnswers.forReply(ThingReply("no_memory")))

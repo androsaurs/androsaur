@@ -533,7 +533,7 @@ class Brain(context: Context) {
                     changeAccessory(it, data.optString("wear") == "true", data.optString("personId"))
                 }
                 "announce" -> launch { announce(data) }
-                "remember", "find" -> launch { thing(intent, data) }
+                "remember", "find", "forget" -> launch { thing(intent, data) }
                 "timer_left" -> say(Answers.timerLeft(timerEndsAt?.let { ((it - System.currentTimeMillis()) / 1000).toInt() }))
                 // «Стоп» that silenced the bell needs no words; «стоп» while the timer only counts down switches it off.
                 "stop" -> {

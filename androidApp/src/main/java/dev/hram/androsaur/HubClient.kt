@@ -166,7 +166,7 @@ class HubClient(context: Context, private val prefs: SharedPreferences) {
         postVoice("/api/device/announce/${java.net.URLEncoder.encode(roomId, "UTF-8")}", from, fromId, wav)?.let { it.optString("status").ifEmpty { "error" } to it.text("text") }
 
     /**
-     * Hands the hub what was said after «запомни» (`remember`) or «вспомни» / «где лежит» (`find`) (WAV). Returns the verdict (`saved`, `updated`,
+     * Hands the hub what was said after «запомни» (`remember`), «вспомни» / «где лежит» (`find`) or «забудь» (`forget`) (WAV). Returns the verdict (`saved`, `updated`,
      * `found`, `not_found`, `unclear`, `no_groq`, `no_memory`, `error`) with the text and, for `updated`, the earlier
      * record; null when the hub did not answer.
      */
