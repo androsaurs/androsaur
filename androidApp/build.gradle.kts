@@ -6,8 +6,8 @@ android {
         applicationId = "dev.hram.androsaur"
         minSdk = 26
         targetSdk = 35
-        versionCode = 12
-        versionName = "0.6-character-accessories"
+        versionCode = 14
+        versionName = "0.7.1-horoscope-speech"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildFeatures { compose = true; buildConfig = true }

@@ -6,6 +6,7 @@ import android.os.Build
 import android.provider.Settings
 import dev.hram.androsaur.hub.HubSettings
 import dev.hram.androsaur.character.AccessoryEdit
+import dev.hram.androsaur.commands.DailyHoroscope
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -192,6 +193,34 @@ class HubClient(context: Context, private val prefs: SharedPreferences) {
     private fun register(base: String): Boolean {
         registered = call("POST", "$base/api/device/register", registration())?.first == 200
         return registered
+    }
+
+    /** Ask the current provider for this person's current sign. Only today's success is cached. */
+    fun horoscope(person: String): Pair<String, DailyHoroscope?> {
+        val base = url
+        val cacheKey = "horoscope:$base:$person"
+        fun reading(body: JSONObject?): DailyHoroscope? = body?.takeIf { it.optString("status") == "ok" }?.let {
+            DailyHoroscope(it.optString("person"), it.optString("sign"), it.optString("sign_name"),
+                it.optString("text"), it.optString("source_name"), it.optLong("fetched_at_ms"), it.optLong("valid_until_ms"),
+                it.optString("source_speech_name").takeIf { name -> name.isNotBlank() && name != "null" } ?: it.optString("source_name"))
+                .takeIf { value -> value.usableFor(person, System.currentTimeMillis()) }
+        }
+        val reply = if (base.isEmpty()) null else call("POST", "$base/api/horoscope", JSONObject().put("person", person), readTimeoutMs = 8000)
+        if (reply?.first == 200) {
+            val body = reply.second
+            val value = reading(body)
+            if (value != null) {
+                prefs.edit().putString(cacheKey, body.toString()).apply()
+                return "ok" to value
+            }
+            // A changed/cleared sign or disabled integration supersedes the offline copy immediately.
+            prefs.edit().remove(cacheKey).apply()
+            return body.optString("status").takeIf { it != "ok" }.orEmpty() to null
+        }
+        val cached = runCatching { JSONObject(prefs.getString(cacheKey, "{}") ?: "{}") }.getOrNull()
+        reading(cached)?.let { return "ok" to it }
+        prefs.edit().remove(cacheKey).apply()
+        return (if (base.isEmpty()) "hub_missing" else "unavailable") to null
     }
 
     private fun failure(reply: Pair<Int, JSONObject>?): Result<Reply> = Result.failure(IllegalStateException(reply?.let { "ответ ${it.first}" } ?: "нет связи"))

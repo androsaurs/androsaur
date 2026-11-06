@@ -28,6 +28,10 @@ import dev.hram.androsaur.hub.WakePhraseSettings
 import dev.hram.androsaur.hub.Rename
 import dev.hram.androsaur.commands.Answers
 import dev.hram.androsaur.commands.Calculator
+import dev.hram.androsaur.commands.HoroscopeAnswers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import dev.hram.androsaur.weather.Greeting
 import dev.hram.androsaur.weather.WeatherChoice
 import dev.hram.androsaur.weather.WeatherReading
@@ -482,7 +486,8 @@ class Brain(context: Context) {
      * face («Время вышло.» and a bell until «стоп», the wake word or a touch), how much is left, «стоп». All of it is local to
      * this phone; the weather is whatever [weather] holds (the hub's or the phone's own).
      */
-    private suspend fun followCommands() {
+    private suspend fun followCommands() = coroutineScope {
+        var horoscopeJob: Job? = null
         while (true) {
             delay(250)
             if (stopRingRequested) { stopRingRequested = false; audioClient.post("/ring/stop", JSONObject()) }
@@ -506,6 +511,10 @@ class Brain(context: Context) {
                     Greeting.whenLater(time.hour, (at - System.currentTimeMillis()) / 3_600_000.0, time.toLocalDate() != now.toLocalDate())
                 }))
                 "weather_tomorrow" -> say(Answers.weatherTomorrow(weather))
+                "horoscope" -> {
+                    horoscopeJob?.cancel()
+                    horoscopeJob = launch { tellHoroscope(data) }
+                }
                 "timer" -> data.optString("seconds").toIntOrNull()?.let { seconds ->
                     setTimer(System.currentTimeMillis() + seconds * 1000L)
                     say(Answers.timerSet(seconds))
@@ -517,7 +526,10 @@ class Brain(context: Context) {
                 }
                 "timer_left" -> say(Answers.timerLeft(timerEndsAt?.let { ((it - System.currentTimeMillis()) / 1000).toInt() }))
                 // «Стоп» that silenced the bell needs no words; «стоп» while the timer only counts down switches it off.
-                "stop" -> if (data.optString("wasRinging") != "true" && timerEndsAt != null) { setTimer(null); say(Answers.TIMER_OFF) }
+                "stop" -> {
+                    horoscopeJob?.cancel()
+                    if (data.optString("wasRinging") != "true" && timerEndsAt != null) { setTimer(null); say(Answers.TIMER_OFF) }
+                }
             }
         }
     }
@@ -525,6 +537,28 @@ class Brain(context: Context) {
     private fun say(text: String) {
         val reply = audioClient.post("/speak", JSONObject().put("text", text))
         if (reply == null || reply.first != 200) note = "Не сказал: ${reply?.second?.optString("error") ?: "звук не отвечает"}"
+    }
+
+    private suspend fun tellHoroscope(data: JSONObject) {
+        if (data.optString("tomorrow") == "true") { say("Пока я рассказываю гороскоп только на сегодня."); return }
+        // Recognition triggered by the wake word can finish after a short spoken command.
+        val deadline = SystemClock.elapsedRealtime() + 4000
+        while (identifyUntil != 0L && SystemClock.elapsedRealtime() < deadline) delay(100)
+        fun currentPerson(): String? = badgeId?.takeIf {
+            tracking && Reflexes.present(SystemClock.elapsedRealtime(), lastFaceAt) &&
+                (lastWakeAt == null || (recognizedAt ?: 0) >= lastWakeAt!!)
+        }
+        val person = currentPerson()
+        val commandPerson = data.optString("personId")
+        if (person == null || (commandPerson.isNotEmpty() && person != commandPerson)) {
+            say(HoroscopeAnswers.problem("unknown_person")); return
+        }
+        val (status, reading) = hub.horoscope(person)
+        currentCoroutineContext().ensureActive()
+        if (currentPerson() != person) { say(HoroscopeAnswers.problem("unknown_person")); return }
+        say(if (reading != null) reading.spoken()
+            else if (status == "hub_missing") "Подключи хаб и укажи в нём свой знак зодиака."
+            else HoroscopeAnswers.problem(status))
     }
 
     private fun changeAccessory(requested: CharacterAccessory, wear: Boolean, commandPerson: String) {
