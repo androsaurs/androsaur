@@ -1,5 +1,6 @@
 package dev.hram.androsaur
 
+import dev.hram.androsaur.commands.ThingReply
 import android.content.Context
 import android.content.SharedPreferences
 import android.os.Build
@@ -161,19 +162,32 @@ class HubClient(context: Context, private val prefs: SharedPreferences) {
      * Hands the hub a message for the speaker of a room (WAV): it is written out and spoken there. Returns the hub's verdict
      * (`spoken`, `unclear`, `no_groq`, `no_home`, `unknown_room`, `error`) with what it made of the voice, or null when the hub did not answer.
      */
-    fun announce(roomId: String, from: String, fromId: String, wav: ByteArray): Pair<String, String?>? {
+    fun announce(roomId: String, from: String, fromId: String, wav: ByteArray): Pair<String, String?>? =
+        postVoice("/api/device/announce/${java.net.URLEncoder.encode(roomId, "UTF-8")}", from, fromId, wav)?.let { it.optString("status").ifEmpty { "error" } to it.text("text") }
+
+    /**
+     * Hands the hub what was said after «запомни» (`remember`) or «вспомни» / «где лежит» (`find`) (WAV). Returns the verdict (`saved`, `updated`,
+     * `found`, `not_found`, `unclear`, `no_groq`, `no_memory`, `error`) with the text and, for `updated`, the earlier
+     * record; null when the hub did not answer.
+     */
+    fun things(kind: String, from: String, fromId: String, wav: ByteArray): ThingReply? =
+        postVoice("/api/device/things/$kind", from, fromId, wav)?.let { ThingReply(it.optString("status").ifEmpty { "error" }, it.text("text"), it.text("previous")) }
+
+    private fun JSONObject.text(name: String): String? = optString(name).takeIf { it.isNotEmpty() && !isNull(name) }
+
+    /** A recorded voice for the hub to make sense of: the hub's JSON answer, `{"status": "error"}` for an HTTP error, null when it did not answer. */
+    private fun postVoice(path: String, from: String, fromId: String, wav: ByteArray): JSONObject? {
         val base = url.ifEmpty { return null }
         val q = "from=${java.net.URLEncoder.encode(from, "UTF-8")}&fromId=${java.net.URLEncoder.encode(fromId, "UTF-8")}"
         var connection: HttpURLConnection? = null
         return try {
-            connection = (URL("$base/api/device/announce/${java.net.URLEncoder.encode(roomId, "UTF-8")}?$q").openConnection() as HttpURLConnection).apply {
+            connection = (URL("$base$path?$q").openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"; connectTimeout = 3000; readTimeout = 30_000; doOutput = true
                 setRequestProperty("Content-Type", "audio/wav")
                 outputStream.use { it.write(wav) }
             }
-            if (connection.responseCode != 200) return "error" to null
-            val reply = JSONObject(connection.inputStream.use { it.readBytes().toString(Charsets.UTF_8) })
-            reply.optString("status").ifEmpty { "error" } to reply.optString("text").takeIf { it.isNotEmpty() && !reply.isNull("text") }
+            if (connection.responseCode != 200) return JSONObject().put("status", "error")
+            JSONObject(connection.inputStream.use { it.readBytes().toString(Charsets.UTF_8) })
         } catch (_: Exception) { null }
         finally { connection?.disconnect() }
     }

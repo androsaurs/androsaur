@@ -28,6 +28,8 @@ import dev.hram.androsaur.hub.WakePhraseSettings
 import dev.hram.androsaur.hub.Rename
 import dev.hram.androsaur.commands.Answers
 import dev.hram.androsaur.commands.AnnounceAnswers
+import dev.hram.androsaur.commands.ThingAnswers
+import dev.hram.androsaur.commands.ThingReply
 import dev.hram.androsaur.commands.Calculator
 import dev.hram.androsaur.commands.HoroscopeAnswers
 import dev.hram.androsaur.commands.MorningHoroscope
@@ -531,6 +533,7 @@ class Brain(context: Context) {
                     changeAccessory(it, data.optString("wear") == "true", data.optString("personId"))
                 }
                 "announce" -> launch { announce(data) }
+                "remember", "find" -> launch { thing(intent, data) }
                 "timer_left" -> say(Answers.timerLeft(timerEndsAt?.let { ((it - System.currentTimeMillis()) / 1000).toInt() }))
                 // «Стоп» that silenced the bell needs no words; «стоп» while the timer only counts down switches it off.
                 "stop" -> {
@@ -558,6 +561,16 @@ class Brain(context: Context) {
         val reply = hub.announce(data.optString("roomId"), data.optString("person"), data.optString("personId"), wav)
         audioClient.post("/announce/delete", JSONObject().put("id", id))
         say(AnnounceAnswers.forStatus(reply?.first, data.optString("room"), reply?.second))
+    }
+
+    /** «Запомни» / «где лежит» was recorded by the audio module: the hub makes sense of it; says what was kept or found. */
+    private fun thing(kind: String, data: JSONObject) {
+        val id = data.optString("announceId")
+        val wav = audioClient.getBytes("/announce/audio?id=$id")
+        if (wav == null) { say(ThingAnswers.forReply(ThingReply("error"))); return }
+        val reply = hub.things(kind, data.optString("person"), data.optString("personId"), wav)
+        audioClient.post("/announce/delete", JSONObject().put("id", id))
+        say(ThingAnswers.forReply(reply))
     }
 
     private fun say(text: String) {

@@ -6,8 +6,8 @@ android {
         applicationId = "dev.hram.androsaur"
         minSdk = 26
         targetSdk = 35
-        versionCode = 21
-        versionName = "0.9.2-penguin2"
+        versionCode = 23
+        versionName = "0.9.4-memory"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildFeatures { compose = true; buildConfig = true }
