@@ -46,37 +46,73 @@
       "from": 0.8,
       "to": 3.8,
       "en": "Nobody is around. The assistant sleeps.",
-      "ru": "Никого нет. Ассистент спит."
+      "ru": "Никого нет. Ассистент спит.",
+      "title": {
+        "en": "Nobody home",
+        "ru": "В доме тихо"
+      }
     },
     {
       "from": 4.2,
       "to": 7.8,
-      "en": "“Zyuzya!” — and it wakes up.",
-      "ru": "«Зюзя!» — и он просыпается."
+      "en": "“Zyuzya!”",
+      "ru": "«Зюзя!»",
+      "title": {
+        "en": "Wake word",
+        "ru": "Зовём по имени"
+      },
+      "label": {
+        "ru": "Вы",
+        "en": "You"
+      }
     },
     {
       "from": 8.2,
       "to": 13.5,
       "en": "It recognizes who is in front of the camera.",
-      "ru": "Узнаёт, кто перед камерой."
+      "ru": "Узнаёт, кто перед камерой.",
+      "title": {
+        "en": "Knows you",
+        "ru": "Узнаёт семью"
+      }
     },
     {
       "from": 14.2,
       "to": 21.5,
-      "en": "A voice note waits for this person and is played on sight.",
-      "ru": "Голосовая записка ждёт именно этого человека и звучит, когда он в кадре."
+      "en": "You have a message from Masha",
+      "ru": "Тебе сообщение от Маши",
+      "title": {
+        "en": "A note for you",
+        "ru": "Записка ждёт адресата"
+      },
+      "label": {
+        "ru": "Зюзя",
+        "en": "Zyuzya"
+      }
     },
     {
       "from": 22.2,
       "to": 29.5,
-      "en": "“Put on the glasses” — the character obeys.",
-      "ru": "«Надень очки» — и персонаж слушается."
+      "en": "“Put on the glasses”",
+      "ru": "«Надень очки»",
+      "title": {
+        "en": "Dress up",
+        "ru": "Одевается по голосу"
+      },
+      "label": {
+        "ru": "Вы",
+        "en": "You"
+      }
     },
     {
       "from": 29.5,
       "to": 35.5,
       "en": "Person gone — back to sleep. Everything runs on the phone.",
-      "ru": "Человек ушёл — снова сон. Всё работает на телефоне."
+      "ru": "Человек ушёл — снова сон. Всё работает на телефоне.",
+      "title": {
+        "en": "Back to sleep",
+        "ru": "И снова спит"
+      }
     }
   ],
   "setup": [
@@ -91,5 +127,9 @@
       "step": "sleep"
     }
   ],
-  "settle": 4
+  "settle": 4,
+  "chip": {
+    "en": "Androsaur · open source project",
+    "ru": "Androsaur · открытый проект"
+  }
 }

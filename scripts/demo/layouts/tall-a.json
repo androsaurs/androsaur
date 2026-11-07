@@ -1,0 +1,11 @@
+{
+  "_comment": "Вертикальный шортс 1080x1920, вариант A (утверждён 07.11.2026): плашка и заголовок сверху, прямой телефон, карточка снизу. Эталон вида: tall-a.png. Все размеры в пикселях кадра.",
+  "canvas": [1080, 1920],
+  "background": {"base": [4, 10, 8], "glow": [22, 90, 62], "glow_center_y": 800, "glow_rx": 560, "glow_ry": 620, "glow_blur": 160},
+  "chip": {"y": 110, "height": 60, "size": 30, "fill": [14, 44, 34], "outline": [34, 96, 70], "dot": [90, 230, 160], "text": [150, 240, 190]},
+  "title": {"y": 205, "size": 66, "color": [255, 255, 255]},
+  "phone": {"body_height": 1300, "top": 310, "bezel": 16, "shadow_above": 18, "shadow_below": 34},
+  "card": {"y": 1655, "size": 54, "label_size": 28, "max_text_width": 860, "padding_x": 90, "radius": 28,
+           "fill": [12, 30, 24, 235], "outline": [40, 80, 62, 255], "label_color": [90, 230, 160]},
+  "font": "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+}
