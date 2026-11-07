@@ -250,8 +250,9 @@ class Brain(context: Context) {
         while (true) {
             val now = SystemClock.elapsedRealtime()
             personalCharacter.observe(badgeId, tracking && Reflexes.present(now, lastFaceAt), now)
-            characterId = personalCharacter.resolve(characterAssignments)
-            val accessory = CharacterAccessory.restore(accessoryAssignments[personalCharacter.person]?.get(characterId.id))
+            val staged = sceneCharacter
+            characterId = staged ?: personalCharacter.resolve(characterAssignments)
+            val accessory = if (staged != null) sceneAccessory else CharacterAccessory.restore(accessoryAssignments[personalCharacter.person]?.get(characterId.id))
                 .takeIf { characterId.supportsAccessory(it) } ?: CharacterAccessory.NONE
             characterState.value = CharacterState.from(
                 expression(now), face?.let { Reflexes.gaze(it.first, it.second) } ?: (0.0 to 0.0),
@@ -626,6 +627,13 @@ class Brain(context: Context) {
 
     private fun changeAccessory(requested: CharacterAccessory, wear: Boolean, commandPerson: String) {
         val now = SystemClock.elapsedRealtime()
+        val staged = sceneCharacter
+        if (staged != null && sceneName != null && staged.supportsAccessory(requested)) {
+            sceneAccessory = accessoryTarget(sceneAccessory, requested, wear)
+            refreshCharacters.trySend(Unit)
+            say(if (requested == CharacterAccessory.GLASSES) (if (wear) "Надел очки." else "Снял очки.") else if (wear) "Готово." else "Снял.")
+            return
+        }
         val person = badgeId?.takeIf { tracking && Reflexes.present(now, lastFaceAt) }
         if (person == null || (commandPerson.isNotEmpty() && commandPerson != person)) {
             say("Посмотри в камеру, чтобы я узнал тебя.")
@@ -1126,6 +1134,7 @@ class Brain(context: Context) {
             if (round % 20 == 0) autoTrack()
             pollEvents()
             if (tracking) { pollFace(); watchArrival() }
+            applyScene()
             if (identifyUntil != 0L) pollIdentity()
             round++
             delay(250)
@@ -1231,7 +1240,7 @@ class Brain(context: Context) {
 
     /** Asks the camera who is in front of it (at a person's arrival and at the wake word). Only when it is already watching (tracking is on). */
     private fun startIdentify(ms: Long = IDENTIFY_MS) {
-        if (!tracking) return
+        if (!tracking || sceneOn) return
         nextIdentifyAt = SystemClock.elapsedRealtime() + if (badge == UNKNOWN || recognizedAt == null) RETRY_IDENTIFY_MS else RECHECK_EVERY_MS
         val reply = cameraClient.post("/people/identify", JSONObject().put("ms", ms))
         if (reply == null || reply.first != 200) { note = "Опознание не началось: ${reply?.second?.optString("error") ?: "нет ответа"}"; return }
@@ -1261,6 +1270,7 @@ class Brain(context: Context) {
     }
 
     private fun pollFace() {
+        if (sceneOn) return
         val reply = cameraClient.get("/faces")?.second ?: return
         if (!reply.optBoolean("enabled", false)) {
             // The camera restarted and forgot the tracking this app asked for: ask again.
@@ -1290,6 +1300,40 @@ class Brain(context: Context) {
         debugExpression = expression?.let { e -> Expression.entries.firstOrNull { it.name.equals(e, ignoreCase = true) } }
         debugUntil = SystemClock.elapsedRealtime() + seconds.coerceIn(0, 600) * 1000L
         lastActivityAt = SystemClock.elapsedRealtime() // the screen stays lit for the look
+    }
+
+    // Staged scenes for demo recordings (adb broadcast DEBUG_SCENE, see MainActivity and scripts/demo): the same events the audio and
+    // camera modules would send, fed in by hand. The app reacts exactly as it does to the real ones (greeting, notes, commands, sleep).
+    @Volatile private var sceneName: String? = null
+    @Volatile private var sceneId: String? = null
+    // While a scene is staged the real camera is not listened to: a real passer-by must not spoil the take.
+    @Volatile private var sceneOn = false
+    // A staged person has their own character and outfit; nothing of it is saved, so the family's real choices stay as they are.
+    @Volatile private var sceneCharacter: CharacterId? = null
+    @Volatile private var sceneAccessory = CharacterAccessory.NONE
+
+    fun scene(step: String, name: String?, id: String?, text: String?, intent: String?, data: Map<String, String>) {
+        val now = SystemClock.elapsedRealtime()
+        sceneOn = step != "reset"
+        when (step) {
+            "profile" -> { sceneCharacter = CharacterId.entries.firstOrNull { it.id == data["character"] }; sceneAccessory = CharacterAccessory.restore(data["accessory"]) }
+            "face_in" -> { sceneName = name ?: "Женя"; sceneId = id }
+            "face_out" -> { sceneName = null; sceneId = null; face = null; lastFaceAt = null; badge = ""; badgeId = null; recognizedAt = null }
+            "wake" -> { greetingInterrupt.incrementAndGet(); lastWakeAt = now; lastActivityAt = now; wakeText = text ?: "Зюзя" }
+            "command" -> if (intent != null) { greetingInterrupt.incrementAndGet(); commands.add(intent to JSONObject(data)) }
+            "say" -> text?.let { say(it) }
+            "note" -> { note = text; lastActivityAt = now }
+            "sleep" -> { sceneName = null; sceneId = null; face = null; lastFaceAt = null; badge = ""; badgeId = null; recognizedAt = null; note = null; lastActivityAt = now - dimAfterMs - 60_000L }
+            "reset" -> { sceneName = null; sceneId = null; note = null; sceneCharacter = null; sceneAccessory = CharacterAccessory.NONE }
+        }
+    }
+
+    /** While a scene holds a person in front of the camera, the face stays «seen» and named. */
+    private fun applyScene() {
+        val who = sceneName ?: return
+        val now = SystemClock.elapsedRealtime()
+        face = 0.5 to 0.45; lastFaceAt = now; lastActivityAt = now
+        badge = who; badgeId = sceneId ?: badgeId; recognizedAt = recognizedAt ?: now; identifyUntil = 0L
     }
 
     /** The character on the screen: a diagnostic choice while it lasts, else the person's own. */

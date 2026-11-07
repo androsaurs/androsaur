@@ -1,0 +1,95 @@
+{
+  "title": {
+    "en": "Androsaur: a home assistant from an old phone",
+    "ru": "Androsaur: домашний ассистент из старого телефона"
+  },
+  "duration": 36,
+  "steps": [
+    {
+      "t": 4.0,
+      "step": "wake",
+      "text": "Зюзя"
+    },
+    {
+      "t": 8.0,
+      "step": "face_in",
+      "name": "Женя",
+      "id": "demo"
+    },
+    {
+      "t": 14.0,
+      "step": "note",
+      "text": "Записка для Женя"
+    },
+    {
+      "t": 14.1,
+      "step": "say",
+      "text": "Тебе сообщение от Маши. Купи хлеб, пожалуйста."
+    },
+    {
+      "t": 22.0,
+      "step": "command",
+      "intent": "character_glasses",
+      "data": "wear=true;personId=demo"
+    },
+    {
+      "t": 29.0,
+      "step": "face_out"
+    },
+    {
+      "t": 30.0,
+      "step": "sleep"
+    }
+  ],
+  "subtitles": [
+    {
+      "from": 0.8,
+      "to": 3.8,
+      "en": "Nobody is around. The assistant sleeps.",
+      "ru": "Никого нет. Ассистент спит."
+    },
+    {
+      "from": 4.2,
+      "to": 7.8,
+      "en": "“Zyuzya!” — and it wakes up.",
+      "ru": "«Зюзя!» — и он просыпается."
+    },
+    {
+      "from": 8.2,
+      "to": 13.5,
+      "en": "It recognizes who is in front of the camera.",
+      "ru": "Узнаёт, кто перед камерой."
+    },
+    {
+      "from": 14.2,
+      "to": 21.5,
+      "en": "A voice note waits for this person and is played on sight.",
+      "ru": "Голосовая записка ждёт именно этого человека и звучит, когда он в кадре."
+    },
+    {
+      "from": 22.2,
+      "to": 29.5,
+      "en": "“Put on the glasses” — the character obeys.",
+      "ru": "«Надень очки» — и персонаж слушается."
+    },
+    {
+      "from": 29.5,
+      "to": 35.5,
+      "en": "Person gone — back to sleep. Everything runs on the phone.",
+      "ru": "Человек ушёл — снова сон. Всё работает на телефоне."
+    }
+  ],
+  "setup": [
+    {
+      "step": "reset"
+    },
+    {
+      "step": "profile",
+      "data": "character=puf"
+    },
+    {
+      "step": "sleep"
+    }
+  ],
+  "settle": 4
+}

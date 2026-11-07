@@ -1,0 +1,6 @@
+{
+  "name": "androsaur-demo-tools",
+  "private": true,
+  "description": "ffmpeg binary for scripts/demo/demo.py",
+  "dependencies": { "ffmpeg-static": "^5.3.0" }
+}

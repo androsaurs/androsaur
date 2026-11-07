@@ -68,6 +68,13 @@ class MainActivity : ComponentActivity() {
         registerReceiver(object : android.content.BroadcastReceiver() {
             override fun onReceive(c: android.content.Context, i: Intent) { brain.debugFace(i.getStringExtra("character"), i.getStringExtra("expression"), i.getIntExtra("seconds", 30)) }
         }, android.content.IntentFilter("dev.hram.androsaur.DEBUG_FACE"), "android.permission.DUMP", null, android.content.Context.RECEIVER_EXPORTED)
+        // Staged scene for demo recordings: `adb shell am broadcast -a dev.hram.androsaur.DEBUG_SCENE --es step face_in --es name Женя` (steps: face_in, face_out, wake, command, say, note, sleep, reset). DUMP only.
+        registerReceiver(object : android.content.BroadcastReceiver() {
+            override fun onReceive(c: android.content.Context, i: Intent) {
+                val data = i.getStringExtra("data").orEmpty().split(';').mapNotNull { kv -> kv.split('=', limit = 2).takeIf { it.size == 2 }?.let { it[0] to it[1] } }.toMap()
+                brain.scene(i.getStringExtra("step").orEmpty(), i.getStringExtra("name"), i.getStringExtra("id"), i.getStringExtra("text"), i.getStringExtra("intent"), data)
+            }
+        }, android.content.IntentFilter("dev.hram.androsaur.DEBUG_SCENE"), "android.permission.DUMP", null, android.content.Context.RECEIVER_EXPORTED)
         // Where the phone is, coarsely, for the weather; asked once. Refused, the weather comes only for a place set in the hub.
         if (!brain.weatherSource.hasLocationPermission() && savedInstanceState == null) requestPermissions(arrayOf(android.Manifest.permission.ACCESS_COARSE_LOCATION), 1)
         lifecycleScope.launch { repeatOnLifecycle(Lifecycle.State.STARTED) { withContext(Dispatchers.IO) { brain.run() } } }
