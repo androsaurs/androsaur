@@ -39,6 +39,10 @@ class Profiler(private val send: (JSONArray) -> Unit) {
         if (run.isEmpty() || at - startedAt > RUN_LIMIT_MS || at < startedAt) return
         val kept = JSONObject()
         data?.keys()?.forEach { k -> if (k in KEYS) kept.put(k, data.get(k)) }
+        // Words only of a failed command window (a phrase nothing matched, or a timeout): to tell what the recognizer heard. Never of a command that worked.
+        if (data != null && (stage == "command_timeout" || (stage == "command_heard" && data.optString("understood") == "none"))) {
+            WORD_KEYS.forEach { k -> data.optString(k).takeIf { it.isNotEmpty() }?.let { kept.put(k, it.take(80)) } }
+        }
         if (queue.size >= MAX_QUEUE) queue.poll()
         queue.add(JSONObject().put("run", run).put("ts", at).put("src", src).put("stage", stage).put("data", kept))
     }
@@ -54,6 +58,7 @@ class Profiler(private val send: (JSONArray) -> Unit) {
     }
 
     private companion object {
+        val WORD_KEYS = setOf("text", "lastPartial")
         const val RUN_LIMIT_MS = 180_000L
         const val MAX_QUEUE = 1000
         const val BATCH = 200
