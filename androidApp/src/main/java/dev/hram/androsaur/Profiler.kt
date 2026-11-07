@@ -60,6 +60,7 @@ class Profiler(private val send: (JSONArray) -> Unit) {
         val KEYS = setOf(
             "reason", "understood", "intent", "peakDbfs", "thresholdDbfs", "utterances", "speaker", "firstAudioMs", "audioMs",
             "synthMs", "loadMs", "durationMs", "chars", "engine", "levelDbfs", "end", "status", "code", "bytes",
+            "floorDbfs", "speechMs", "recordedMs", "speechStartMs", "speechEndMs",
         )
     }
 }
