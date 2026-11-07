@@ -37,6 +37,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import dev.hram.androsaur.medication.MedicationSchedule
 import dev.hram.androsaur.weather.Greeting
 import dev.hram.androsaur.weather.WeatherChoice
 import dev.hram.androsaur.weather.WeatherReading
@@ -319,6 +320,11 @@ class Brain(context: Context) {
                 if (json != prefs.getString("roles", "{}")) { prefs.edit().putString("roles", json).apply(); cameraPeople()?.let { sendPeople(it) } }
             }
             reply.rooms?.let { applyRooms(it) }
+            reply.medications?.let {
+                prefs.edit().putString("medication_plans", it.toString()).apply()
+                if (it.toString() != lastMedicationLog) { lastMedicationLog = it.toString(); android.util.Log.i("Medication", "plans from the hub: ${it.length()} people, ${(0 until it.length()).sumOf { i -> it.getJSONObject(i).optJSONArray("times")?.length() ?: 0 }} times") }
+            }
+            flushMedication()
             acceptCharacters(request, reply.characters, reply.accessories)
             uploadNotes()
             done = reply.commands.map { HubClient.Done(it.id, execute(it)) }
@@ -534,6 +540,7 @@ class Brain(context: Context) {
                 "character_accessory" -> CharacterAccessory.entries.firstOrNull { it.id == data.optString("accessory") }?.let {
                     changeAccessory(it, data.optString("wear") == "true", data.optString("personId"))
                 }
+                "medication_taken" -> takeMedication(data.optString("personId"))
                 "announce" -> launch { announce(data) }
                 "remember", "find", "forget" -> launch { thing(intent, data) }
                 "timer_left" -> say(Answers.timerLeft(timerEndsAt?.let { ((it - System.currentTimeMillis()) / 1000).toInt() }))
@@ -761,6 +768,99 @@ class Brain(context: Context) {
         true
     }
 
+    // --- medicine reminders ---
+
+    private fun medicationTimes(personId: String): List<String> {
+        val plans = runCatching { JSONArray(prefs.getString("medication_plans", "[]") ?: "[]") }.getOrDefault(JSONArray())
+        for (i in 0 until plans.length()) {
+            val plan = plans.getJSONObject(i)
+            if (plan.optString("person") != personId) continue
+            val times = plan.optJSONArray("times") ?: return emptyList()
+            return List(times.length()) { times.getString(it) }
+        }
+        return emptyList()
+    }
+
+    private var lastMedicationLog = ""
+
+    private fun slotOf(store: String, personId: String): String? =
+        runCatching { JSONObject(prefs.getString(store, "{}") ?: "{}") }.getOrDefault(JSONObject()).optString(personId).ifEmpty { null }
+
+    @Synchronized
+    private fun markMedication(store: String, personId: String, slot: String, kind: String) {
+        val marks = runCatching { JSONObject(prefs.getString(store, "{}") ?: "{}") }.getOrDefault(JSONObject())
+        val events = runCatching { JSONArray(prefs.getString("medication_events", "[]") ?: "[]") }.getOrDefault(JSONArray())
+        events.put(JSONObject().put("person", personId).put("slot", slot).put("kind", kind).put("at", System.currentTimeMillis()))
+        // A phone that cannot reach the hub for days keeps the latest events only.
+        val kept = JSONArray().also { out -> for (i in maxOf(0, events.length() - 200) until events.length()) out.put(events.get(i)) }
+        prefs.edit().putString(store, marks.put(personId, slot).toString()).putString("medication_events", kept.toString()).apply()
+        android.util.Log.i("Medication", "$kind $personId $slot (queued for the hub: ${kept.length()})")
+    }
+
+    /** Sends the reminders and confirmations the hub has not got yet; they stay queued when it does not answer. */
+    private fun flushMedication() {
+        val events = runCatching { JSONArray(prefs.getString("medication_events", "[]") ?: "[]") }.getOrDefault(JSONArray())
+        if (events.length() == 0) return
+        val sent = hub.postMedication(events)
+        android.util.Log.i("Medication", "events to the hub: ${events.length()} -> ${if (sent) "taken" else "not taken, will retry"}")
+        if (!sent) return
+        synchronized(this) {
+            val now = runCatching { JSONArray(prefs.getString("medication_events", "[]") ?: "[]") }.getOrDefault(JSONArray())
+            val rest = JSONArray().also { out -> for (i in events.length() until now.length()) out.put(now.get(i)) }
+            prefs.edit().putString("medication_events", rest.toString()).apply()
+        }
+    }
+
+    /**
+     * «Пора принять лекарство»: once per interval of the person's schedule, the first time the camera sees them in it. Marked as soon
+     * as it is spoken, so a reminder cut short (the person left) is not repeated in the same interval. Returns whether it spoke.
+     */
+    private suspend fun remindMedication(personId: String, name: String): Boolean {
+        val now = java.time.LocalDateTime.now()
+        val slot = MedicationSchedule.reminderDue(
+            medicationTimes(personId), now.toLocalDate().toEpochDay(), now.hour * 60 + now.minute, slotOf("medication_reminded", personId),
+        ) ?: return false
+        val token = greetingInterrupt.get()
+        val reply = audioClient.post("/speak", JSONObject().put("text", "$name, пора принять лекарство."))
+        if (reply == null || reply.first != 200) return false
+        markMedication("medication_reminded", personId, slot, "reminded")
+        note = "Напоминание о лекарстве: $name"
+        waitForReminder(personId, token)
+        return true
+    }
+
+    /** Waits for the reminder to be spoken, so the notes come after it; stops it when the person leaves. */
+    private suspend fun waitForReminder(personId: String, token: Long) {
+        val began = SystemClock.elapsedRealtime()
+        var started = false
+        while (SystemClock.elapsedRealtime() - began < 30_000) {
+            delay(250)
+            val still = MorningHoroscope.stillFor(
+                personId, badgeId, tracking && Reflexes.present(SystemClock.elapsedRealtime(), lastFaceAt),
+                interrupted = token != greetingInterrupt.get() || mode.isNotEmpty() || ringing,
+            )
+            if (!still) {
+                if (token == greetingInterrupt.get() && mode.isEmpty()) audioClient.post("/speak/stop", JSONObject())
+                return
+            }
+            val state = audioClient.get("/speech")?.takeIf { it.first == 200 }?.second ?: return
+            if (state.optBoolean("speaking")) started = true
+            else if (started || SystemClock.elapsedRealtime() - began > 1500) return
+        }
+    }
+
+    /** «Принял»: counts only in the open window (a reminder was given in the interval running now and is not confirmed yet). */
+    private fun takeMedication(personId: String) {
+        val now = java.time.LocalDateTime.now()
+        val slot = MedicationSchedule.windowOpen(
+            medicationTimes(personId), now.toLocalDate().toEpochDay(), now.hour * 60 + now.minute,
+            slotOf("medication_reminded", personId), slotOf("medication_taken", personId),
+        )
+        if (slot == null) { say("Сейчас нет напоминания."); return }
+        markMedication("medication_taken", personId, slot, "taken")
+        say("Хорошо, отмечено.")
+    }
+
     private fun greetingStillFor(personId: String, token: Long): Boolean = MorningHoroscope.stillFor(
         personId, badgeId, tracking && Reflexes.present(SystemClock.elapsedRealtime(), lastFaceAt),
         interrupted = token != greetingInterrupt.get() || !greetingOn || mode.isNotEmpty() || ringing,
@@ -839,6 +939,10 @@ class Brain(context: Context) {
             if (!audio.running || speaking || mode.isNotEmpty() || ringing) continue
             val personBeforeGreeting = badgeId
             personBeforeGreeting?.let { id -> if (greet(id, name)) lastActivityAt = SystemClock.elapsedRealtime() }
+            if (badgeId != personBeforeGreeting || badgeText(SystemClock.elapsedRealtime()) != name ||
+                speaking || mode.isNotEmpty() || ringing) continue
+            // The medicine reminder: once in an interval, when the camera first sees the person in it (after the greeting, before the notes).
+            badgeId?.let { id -> if (remindMedication(id, name)) lastActivityAt = SystemClock.elapsedRealtime() }
             if (badgeId != personBeforeGreeting || badgeText(SystemClock.elapsedRealtime()) != name ||
                 speaking || mode.isNotEmpty() || ringing) continue
             if (!gate.shouldCheck(name, now)) continue

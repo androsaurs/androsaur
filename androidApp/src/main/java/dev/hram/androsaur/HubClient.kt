@@ -78,6 +78,8 @@ class HubClient(context: Context, private val prefs: SharedPreferences) {
         val accessories: Map<String, Map<String, String>>? = null,
         /** Rooms with speakers (id, name, words) for «передай в детскую»; null — the hub did not send them, keep the last ones. */
         val rooms: JSONArray? = null,
+        /** Medicine schedules of the people of the house (person, name, times); null — the hub did not send them, keep the last ones. */
+        val medications: JSONArray? = null,
     )
 
     /** Whom the camera knows, for the hub: [people] are objects with id, name, samples and digest (no sets); [faceModel] is the camera's face model. */
@@ -130,9 +132,10 @@ class HubClient(context: Context, private val prefs: SharedPreferences) {
         }
         val accessories = parseAccessories(body)
         val rooms = body.optJSONArray("rooms")
-        if (config.toString() == stored().toString()) return Result.success(Reply(null, commands, peopleRev, upload, place, weather, texts, roles, characters, accessories, rooms))
+        val medications = body.optJSONArray("medications")
+        if (config.toString() == stored().toString()) return Result.success(Reply(null, commands, peopleRev, upload, place, weather, texts, roles, characters, accessories, rooms, medications))
         prefs.edit().putString(KEY_CONFIG, config.toString()).apply()
-        return Result.success(Reply(config, commands, peopleRev, upload, place, weather, texts, roles, characters, accessories, rooms))
+        return Result.success(Reply(config, commands, peopleRev, upload, place, weather, texts, roles, characters, accessories, rooms, medications))
     }
 
     /** Hands the hub the sets of the people it asked for (the camera's export, filtered). The sets are never logged. */
@@ -180,6 +183,12 @@ class HubClient(context: Context, private val prefs: SharedPreferences) {
     fun sendTrace(events: JSONArray) {
         val base = url.ifEmpty { return }
         call("POST", "$base/api/device/trace", JSONObject().put("device", deviceId).put("events", events))
+    }
+
+    /** Tells the hub which reminders were given and confirmed (person, interval, kind, time); true when it took them. */
+    fun postMedication(events: JSONArray): Boolean {
+        val base = url.ifEmpty { return false }
+        return call("POST", "$base/api/device/medication", JSONObject().put("device", deviceId).put("events", events))?.first == 204
     }
 
     private fun JSONObject.text(name: String): String? = optString(name).takeIf { it.isNotEmpty() && !isNull(name) }
