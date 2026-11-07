@@ -4,117 +4,11 @@
     "ru": "Androsaur: домашний ассистент из старого телефона"
   },
   "duration": 36,
-  "steps": [
-    {
-      "t": 4.0,
-      "step": "wake",
-      "text": "Зюзя"
-    },
-    {
-      "t": 8.0,
-      "step": "face_in",
-      "name": "Женя",
-      "id": "demo"
-    },
-    {
-      "t": 14.0,
-      "step": "note",
-      "text": "Записка для Женя"
-    },
-    {
-      "t": 14.1,
-      "step": "say",
-      "text": "Тебе сообщение от Маши. Купи хлеб, пожалуйста."
-    },
-    {
-      "t": 22.0,
-      "step": "command",
-      "intent": "character_glasses",
-      "data": "wear=true;personId=demo"
-    },
-    {
-      "t": 29.0,
-      "step": "face_out"
-    },
-    {
-      "t": 30.0,
-      "step": "sleep"
-    }
-  ],
-  "subtitles": [
-    {
-      "from": 0.8,
-      "to": 3.8,
-      "en": "Nobody is around. The assistant sleeps.",
-      "ru": "Никого нет. Ассистент спит.",
-      "title": {
-        "en": "Nobody home",
-        "ru": "В доме тихо"
-      }
-    },
-    {
-      "from": 4.2,
-      "to": 7.8,
-      "en": "“Zyuzya!”",
-      "ru": "«Зюзя!»",
-      "title": {
-        "en": "Wake word",
-        "ru": "Зовём по имени"
-      },
-      "label": {
-        "ru": "Вы",
-        "en": "You"
-      }
-    },
-    {
-      "from": 8.2,
-      "to": 13.5,
-      "en": "It recognizes who is in front of the camera.",
-      "ru": "Узнаёт, кто перед камерой.",
-      "title": {
-        "en": "Knows you",
-        "ru": "Узнаёт семью"
-      }
-    },
-    {
-      "from": 14.2,
-      "to": 21.5,
-      "en": "You have a message from Masha",
-      "ru": "Тебе сообщение от Маши",
-      "title": {
-        "en": "A note for you",
-        "ru": "Записка ждёт адресата"
-      },
-      "label": {
-        "ru": "Зюзя",
-        "en": "Zyuzya"
-      }
-    },
-    {
-      "from": 22.2,
-      "to": 29.5,
-      "en": "“Put on the glasses”",
-      "ru": "«Надень очки»",
-      "title": {
-        "en": "Dress up",
-        "ru": "Одевается по голосу"
-      },
-      "label": {
-        "ru": "Вы",
-        "en": "You"
-      }
-    },
-    {
-      "from": 29.5,
-      "to": 35.5,
-      "en": "Person gone — back to sleep. Everything runs on the phone.",
-      "ru": "Человек ушёл — снова сон. Всё работает на телефоне.",
-      "title": {
-        "en": "Back to sleep",
-        "ru": "И снова спит"
-      }
-    }
-  ],
+  "chip": {
+    "en": "Androsaur · open source project",
+    "ru": "Androsaur · открытый проект"
+  },
+  "layout": "tall-b",
   "setup": [
     {
       "step": "reset"
@@ -128,8 +22,123 @@
     }
   ],
   "settle": 4,
-  "chip": {
-    "en": "Androsaur · open source project",
-    "ru": "Androsaur · открытый проект"
-  }
+  "scenes": [
+    {
+      "from": 0.8,
+      "to": 3.8,
+      "title": {
+        "en": "Nobody home",
+        "ru": "В доме тихо"
+      },
+      "en": "Nobody around: the default dinosaur sleeps.",
+      "ru": "Никого нет: динозавр по умолчанию спит."
+    },
+    {
+      "from": 4.2,
+      "to": 7.8,
+      "title": {
+        "en": "Wake word",
+        "ru": "Зовём по имени"
+      },
+      "label": {
+        "ru": "Вы",
+        "en": "You"
+      },
+      "en": "“Zyuzya!”",
+      "ru": "«Зюзя!»",
+      "do": [
+        {
+          "dt": -0.2,
+          "step": "wake",
+          "text": "Зюзя"
+        }
+      ]
+    },
+    {
+      "from": 8.2,
+      "to": 13.5,
+      "title": {
+        "en": "Knows you",
+        "ru": "Узнаёт семью"
+      },
+      "en": "It knows the person — their own character appears.",
+      "ru": "Узнал человека — появился его личный персонаж.",
+      "do": [
+        {
+          "dt": -0.2,
+          "step": "face_in",
+          "name": "Женя",
+          "id": "demo"
+        }
+      ]
+    },
+    {
+      "from": 14.2,
+      "to": 21.5,
+      "title": {
+        "en": "A note for you",
+        "ru": "Записка ждёт адресата"
+      },
+      "label": {
+        "ru": "Зюзя",
+        "en": "Zyuzya"
+      },
+      "en": "You have a message from Masha",
+      "ru": "Тебе сообщение от Маши",
+      "do": [
+        {
+          "dt": -0.2,
+          "step": "note",
+          "text": "Записка для Женя"
+        },
+        {
+          "dt": -0.1,
+          "step": "say",
+          "text": "Тебе сообщение от Маши. Купи хлеб, пожалуйста."
+        }
+      ]
+    },
+    {
+      "from": 22.2,
+      "to": 29.5,
+      "title": {
+        "en": "Dress up",
+        "ru": "Одевается по голосу"
+      },
+      "label": {
+        "ru": "Вы",
+        "en": "You"
+      },
+      "en": "“Put on the glasses”",
+      "ru": "«Надень очки»",
+      "do": [
+        {
+          "dt": -0.2,
+          "step": "command",
+          "intent": "character_glasses",
+          "data": "wear=true;personId=demo"
+        }
+      ]
+    },
+    {
+      "from": 29.5,
+      "to": 35.5,
+      "title": {
+        "en": "Back to sleep",
+        "ru": "И снова спит"
+      },
+      "en": "Gone — back to the default dinosaur, asleep. All on the phone.",
+      "ru": "Ушёл — снова динозавр и сон. Всё работает на телефоне.",
+      "do": [
+        {
+          "dt": -0.5,
+          "step": "face_out"
+        },
+        {
+          "dt": 0.5,
+          "step": "sleep"
+        }
+      ]
+    }
+  ]
 }

@@ -19,16 +19,15 @@ python3 demo.py frames out/launch-wide-ru.mp4 5 20   # кадры для про�
 ## Сценарий (`scenarios/*.json`)
 
 - `setup` и `settle`: шаги до начала записи и пауза после них, чтобы первый кадр был уже «в сцене».
-- `steps`: `{t, step, ...}` в секундах от начала записи.
-- `chip`, `layout`: текст плашки проекта и имя шаблона вертикального шортса (`scripts/demo/layouts/<имя>.json`, по умолчанию `tall-a`).
-- `subtitles`: `{from, to, title, en, ru, label?}`: заголовок сцены, текст карточки и необязательная подпись отправителя. Новый язык — новое поле в каждой реплике. Шаблон и все размеры описаны в `scripts/demo/README.md`.
+- `scenes`: сцена — один элемент: что видно в кадре и что делает телефон. Поля: `from`, `to` (секунды от начала записи), `title`, `en`, `ru`, `label`, `do` (подробности и пример в `scripts/demo/README.md`).
+- `chip`, `layout`: текст плашки проекта и имя шаблона вертикального шортса (`scripts/demo/layouts/<имя>.json`, по умолчанию `tall-b`).
 - `duration`: длина записи в секундах (лимит screenrecord 180).
 
 ## Шаги сцены (приёмник `DEBUG_SCENE`, только `adb shell`)
 
 | step | параметры | что делает |
 |---|---|---|
-| `profile` | `data=character=puf[;accessory=glasses]` | персонаж и наряд постановочного человека; ничего не сохраняется |
+| `profile` | `data=character=puf[;accessory=glasses]` | персонаж и наряд постановочного человека; ничего не сохраняется. Виден только пока человек узнан (`face_in`), иначе показывается динозавр по умолчанию |
 | `face_in` / `face_out` | `name`, `id` | человек появился (узнан) или ушёл |
 | `wake` | `text` | сказали wake-word |
 | `command` | `intent`, `data=k=v;k=v` | та же команда, что приходит от звука (`character_glasses`, `time`, `weather`…) |

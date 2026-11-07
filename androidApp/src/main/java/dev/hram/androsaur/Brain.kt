@@ -250,7 +250,8 @@ class Brain(context: Context) {
         while (true) {
             val now = SystemClock.elapsedRealtime()
             personalCharacter.observe(badgeId, tracking && Reflexes.present(now, lastFaceAt), now)
-            val staged = sceneCharacter
+            // As in life: the person's own character (and outfit) shows only while they are recognised; nobody known, the default dinosaur.
+            val staged = sceneCharacter?.takeIf { sceneName != null }
             characterId = staged ?: personalCharacter.resolve(characterAssignments)
             val accessory = if (staged != null) sceneAccessory else CharacterAccessory.restore(accessoryAssignments[personalCharacter.person]?.get(characterId.id))
                 .takeIf { characterId.supportsAccessory(it) } ?: CharacterAccessory.NONE
@@ -1321,7 +1322,8 @@ class Brain(context: Context) {
             "face_out" -> { sceneName = null; sceneId = null; face = null; lastFaceAt = null; badge = ""; badgeId = null; recognizedAt = null }
             "wake" -> { greetingInterrupt.incrementAndGet(); lastWakeAt = now; lastActivityAt = now; wakeText = text ?: "Зюзя" }
             "command" -> if (intent != null) { greetingInterrupt.incrementAndGet(); commands.add(intent to JSONObject(data)) }
-            "say" -> text?.let { say(it) }
+            // The broadcast arrives on the main thread, where a network call is refused: the speech request goes from a worker.
+            "say" -> text?.let { t -> Thread { say(t) }.start() }
             "note" -> { note = text; lastActivityAt = now }
             "sleep" -> { sceneName = null; sceneId = null; face = null; lastFaceAt = null; badge = ""; badgeId = null; recognizedAt = null; note = null; lastActivityAt = now - dimAfterMs - 60_000L }
             "reset" -> { sceneName = null; sceneId = null; note = null; sceneCharacter = null; sceneAccessory = CharacterAccessory.NONE }

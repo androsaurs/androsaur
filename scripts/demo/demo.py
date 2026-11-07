@@ -41,11 +41,26 @@ def scene(device, step):
         sum([["--es", k, "'" + str(step[k]).replace("'", "") + "'"] for k in ("name", "id", "text", "intent", "data") if k in step], [])))
 
 
+def load_scenario(path):
+    """Читает сценарий. Сцена (`scenes`) — один элемент: время, заголовок, текст и действия на телефоне (`do`, `dt` от начала сцены,
+    может быть отрицательным: действие чуть раньше подписи). Для записи и сборки сцены раскладываются на `steps` и `subtitles`;
+    старый формат (отдельные `steps` и `subtitles`) тоже читается."""
+    sc = json.load(open(path, encoding="utf-8"))
+    if "scenes" in sc:
+        steps, subs = [], []
+        for scene in sc["scenes"]:
+            for a in scene.get("do", []):
+                steps.append({"t": round(scene["from"] + a.get("dt", 0), 3), **{k: v for k, v in a.items() if k != "dt"}})
+            subs.append({k: v for k, v in scene.items() if k != "do"})
+        sc["steps"], sc["subtitles"] = sorted(steps, key=lambda x: x["t"]), subs
+    return sc
+
+
 def name_of(path): return os.path.splitext(os.path.basename(path))[0]
 
 
 def record(path, device):
-    sc = json.load(open(path, encoding="utf-8"))
+    sc = load_scenario(path)
     os.makedirs(RAW, exist_ok=True)
     remote = f"/sdcard/Download/demo-{name_of(path)}.mp4"
     adb(device, "shell", "am", "start", "-n", "dev.hram.androsaur/.MainActivity")
@@ -148,7 +163,10 @@ def caption_layer(L, title, text, label=None):
     W, H = L["canvas"]; t, k = L["title"], L["card"]
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0)); d = ImageDraw.Draw(img)
     f = ImageFont.truetype(L["font"], k["size"])
-    d.text((W / 2, t["y"]), title, font=ImageFont.truetype(L["font"], t["size"]), fill=tuple(t["color"]), anchor="mt")
+    if t.get("show", True): d.text((W / 2, t["y"]), title, font=ImageFont.truetype(L["font"], t["size"]), fill=tuple(t["color"]), anchor="mt")
+    merge = k.get("merge_title", False)  # заголовок сцены уходит в карточку цветной строкой, отправитель — префиксом текста
+    head = title if merge else label
+    if merge and label: text = f"{label}: {text}"
     lines, cur = [], ""
     for word in text.split():
         trial = (cur + " " + word).strip()
@@ -156,17 +174,17 @@ def caption_layer(L, title, text, label=None):
         else: cur = trial
     lines.append(cur)
     cw = max(d.textlength(l, font=f) for l in lines) + k["padding_x"]
-    lab = 40 if label else 0
+    lab = 40 if head else 0
     step = k["size"] + 14
     ch = len(lines) * step + 42 + lab
     y = k["y"]
     d.rounded_rectangle((W / 2 - cw / 2, y, W / 2 + cw / 2, y + ch), radius=k["radius"], fill=tuple(k["fill"]), outline=tuple(k["outline"]), width=2)
-    if label: d.text((W / 2, y + 18), label, font=ImageFont.truetype(L["font"], k["label_size"]), fill=tuple(k["label_color"]), anchor="mt")
+    if head: d.text((W / 2, y + 18), head, font=ImageFont.truetype(L["font"], k["label_size"]), fill=tuple(k["label_color"]), anchor="mt")
     for i, l in enumerate(lines): d.text((W / 2, y + 22 + lab + i * step), l, font=f, fill=(255, 255, 255), anchor="mt")
     return img
 
 
-def compose_tall(sc, src, lang, out, layout="tall-a"):
+def compose_tall(sc, src, lang, out, layout="tall-b"):
     """Вертикальный шортс по шаблону layouts/<layout>.json.
     Кадры собираются потоком: ffmpeg лишь декодирует запись и кодирует результат, наложение делает Python по одному кадру
     (память не растёт; граф ffmpeg с зацикленными картинками съедал гигабайты)."""
@@ -216,14 +234,14 @@ def compose_wide(sc, src, lang, out, name):
 
 
 def compose(path, langs=("en", "ru"), kinds=("wide", "tall")):
-    sc = json.load(open(path, encoding="utf-8"))
+    sc = load_scenario(path)
     src = os.path.join(RAW, name_of(path) + ".mp4")
     if not os.path.exists(src): sys.exit(f"нет {src}: сначала record")
     os.makedirs(OUT, exist_ok=True)
     for lang in langs:
         for kind in kinds:
             out = os.path.join(OUT, f"{name_of(path)}-{kind}-{lang}.mp4")
-            ok = compose_wide(sc, src, lang, out, name_of(path)) if kind == "wide" else compose_tall(sc, src, lang, out, sc.get("layout", "tall-a"))
+            ok = compose_wide(sc, src, lang, out, name_of(path)) if kind == "wide" else compose_tall(sc, src, lang, out, sc.get("layout", "tall-b"))
             print(("собрано: " if ok else "ОШИБКА: ") + out)
     for f in os.listdir(OUT):
         if f.startswith((".frame-", ".bg-")): os.remove(os.path.join(OUT, f))
