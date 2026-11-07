@@ -63,6 +63,11 @@ class MainActivity : ComponentActivity() {
         }
         brain = Brain(applicationContext)
         takeHub(intent)
+        // Diagnostics without a person: `adb shell am broadcast -a dev.hram.androsaur.DEBUG_FACE --es expression exhausted --es character dinosaur --ei seconds 60`.
+        // Only the system permission DUMP (adb shell has it, ordinary apps do not) may send it; it shows a pose for a while and changes nothing else.
+        registerReceiver(object : android.content.BroadcastReceiver() {
+            override fun onReceive(c: android.content.Context, i: Intent) { brain.debugFace(i.getStringExtra("character"), i.getStringExtra("expression"), i.getIntExtra("seconds", 30)) }
+        }, android.content.IntentFilter("dev.hram.androsaur.DEBUG_FACE"), "android.permission.DUMP", null, android.content.Context.RECEIVER_EXPORTED)
         // Where the phone is, coarsely, for the weather; asked once. Refused, the weather comes only for a place set in the hub.
         if (!brain.weatherSource.hasLocationPermission() && savedInstanceState == null) requestPermissions(arrayOf(android.Manifest.permission.ACCESS_COARSE_LOCATION), 1)
         lifecycleScope.launch { repeatOnLifecycle(Lifecycle.State.STARTED) { withContext(Dispatchers.IO) { brain.run() } } }
@@ -99,7 +104,7 @@ private fun Screen(brain: Brain, dim: (Boolean) -> Unit, openWeather: () -> Unit
     var panel by remember { mutableStateOf(false) }
     var now by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
     val character by brain.character.collectAsStateWithLifecycle()
-    var characterError by remember(brain.characterMode, brain.characterId) { mutableStateOf<String?>(null) }
+    var characterError by remember(brain.characterMode, brain.shownCharacter) { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) { while (true) { now = SystemClock.elapsedRealtime(); delay(100) } }
     val dimmed = character.dimmed
     LaunchedEffect(dimmed) { dim(dimmed) }
@@ -122,7 +127,7 @@ private fun Face(brain: Brain, state: CharacterState, now: Long, onCharacterErro
     if (badge.isNotEmpty()) shown = badge
     val alpha by animateFloatAsState(if (badge.isNotEmpty()) 1f else 0f, tween(500), label = "badge")
     Box(Modifier.fillMaxSize()) {
-        CharacterView(state, brain.characterMode, now, onCharacterError, brain.characterId)
+        CharacterView(state, brain.characterMode, now, onCharacterError, brain.shownCharacter)
         // What to do now, in words: the person should never wonder whether to talk.
         when (state.interaction) {
             Interaction.COMMAND -> Caption("Слушаю", "скажите: «передай жене …»", Modifier.align(Alignment.BottomCenter))

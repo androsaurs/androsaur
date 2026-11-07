@@ -84,9 +84,11 @@ export function createPenguin2Rig({ outfit = 0 } = {}) {
 
   // Flippers in front of the body, hanging from its sides. Shoulder (interaction or speaking)
   // -> swing (idle).
+  const hangs = {};
   function flipper(side, rest) {
     const s = side === 'Left' ? -1 : 1;
-    const shoulder = node(`${side} flipper`, figure, s * 84, -50, { rotation: rest });
+    hangs[side] = node(`${side} flipper hang`, figure, s * 84, -50); // tired poses let the flipper hang from here
+    const shoulder = node(`${side} flipper`, hangs[side], 0, 0, { rotation: rest });
     const swing = node(`${side} flipper swing`, shoulder);
     outline(`${side} flipper shape`, swing, 0, 0, FLIPPER, blue, { outline: rim, scaleX: s });
     outline(`${side} flipper shine`, swing, s * 2, 18, [[-4, 0, 4], [6, 0, 4], [3, 70, 4]], blueLight, { opacity: 0.55 });
@@ -203,18 +205,22 @@ export function createPenguin2Rig({ outfit = 0 } = {}) {
 
   // NEUTRAL, ATTENTIVE, LISTENING, SLEEPY, SAD: eyes, brows, beak, blush and posture.
   const E = (...values) => code => values[code];
-  const eyes = E(1, 1.08, 1.14, 0.1, 0.82);
-  const browY = E(-46, -53, -55, -43, -48), browTilt = E(0, 0, -0.08, 0.06, -0.4);
-  const beakDrop = E(26, 25, 25, 28, 29);
-  const blush = E(0.8, 0.95, 0.9, 0.4, 0.3);
-  const faceY = E(-118, -122, -121, -112, -110), faceTilt = E(0, 0, 0.06, -0.04, 0.05);
-  rig.categoryLayer('expression', [0, 1, 2, 3, 4].map(c => pose(`expression ${CONTRACT.expression[c]}`, [
+  const eyes = E(1, 1.08, 1.14, 0.1, 0.82, 0.55, 0.08);
+  const browY = E(-46, -53, -55, -43, -48, -42, -40), browTilt = E(0, 0, -0.08, 0.06, -0.4, -0.48, -0.55);
+  const beakDrop = E(26, 25, 25, 28, 29, 31, 34);
+  const blush = E(0.8, 0.95, 0.9, 0.4, 0.3, 0.3, 0.3);
+  const faceY = E(-118, -122, -121, -112, -110, -104, -86), faceTilt = E(0, 0, 0.06, -0.04, 0.05, 0.1, 0.3);
+  // Posture of the tired poses (the figure's own y is -186 under the sway); every pose keys every property.
+  const sinkY = E(-186, -186, -186, -186, -186, -174, -144), leanTilt = E(0, 0, 0, 0, 0, 0, 0.18), sinkScale = E(1, 1, 1, 1, 1, 0.97, 0.9), armHang = E(0, 0, 0, 0, 0, 0.1, 0.4);
+  rig.categoryLayer('expression', [0, 1, 2, 3, 4, 5, 6].map(c => pose(`expression ${CONTRACT.expression[c]}`, [
     [expressionEyes, P.scaleY, eyes(c)],
     [leftBrow, P.y, browY(c)], [rightBrow, P.y, browY(c)],
     [leftBrow, P.rotation, browTilt(c)], [rightBrow, P.rotation, -browTilt(c)],
     [beak, P.y, beakDrop(c)],
     [leftBlush.shape, P.opacity, blush(c)], [rightBlush.shape, P.opacity, blush(c)],
     [facePose, P.y, faceY(c)], [facePose, P.rotation, faceTilt(c)],
+    [figure, P.y, sinkY(c)], [figure, P.rotation, leanTilt(c)], [figure, P.scaleY, sinkScale(c)],
+    [hangs.Left, P.rotation, armHang(c)], [hangs.Right, P.rotation, -armHang(c)],
   ])));
 
   // IDLE, COMMAND, RECORDING, NOTE: the right flipper goes up and waves.

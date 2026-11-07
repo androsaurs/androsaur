@@ -930,6 +930,9 @@ class Brain(context: Context) {
             last = mono
             val id = badgeId
             val settings = if (id != null && badge.isNotEmpty() && badge != UNKNOWN && Reflexes.badgeVisible(mono, recognizedAt, lastFaceAt)) sittingSettings(id) else null
+            // Switched off (or never on) for this person: no session is kept, so switching it on later starts afresh instead of
+            // carrying over an old level (and the tired face) from before.
+            if (id != null && settings == null && badge.isNotEmpty() && badge != UNKNOWN) synchronized(sittingLock) { loadSitting(); if (sittingStates.remove(id) != null) saveSitting() }
             if (id == null || settings == null) { sittingLevel = 0; continue }
             val now = System.currentTimeMillis()
             val state = synchronized(sittingLock) {
@@ -1277,7 +1280,23 @@ class Brain(context: Context) {
     private companion object { const val IDENTIFY_MS = 3500L; const val RETRY_IDENTIFY_MS = 6000L
         const val RECHECK_MS = 2000L; const val RECHECK_EVERY_MS = 5000L; const val UNKNOWN = "Не узнаю"; const val HUB_EVERY_MS = 30_000L }
 
+    // Diagnostics (adb broadcast, see MainActivity): show a chosen expression, and a chosen character, for some seconds.
+    @Volatile private var debugExpression: Expression? = null
+    @Volatile private var debugCharacter: CharacterId? = null
+    @Volatile private var debugUntil = 0L
+
+    fun debugFace(character: String?, expression: String?, seconds: Int) {
+        debugCharacter = character?.let { c -> CharacterId.entries.firstOrNull { it.id == c } }
+        debugExpression = expression?.let { e -> Expression.entries.firstOrNull { it.name.equals(e, ignoreCase = true) } }
+        debugUntil = SystemClock.elapsedRealtime() + seconds.coerceIn(0, 600) * 1000L
+        lastActivityAt = SystemClock.elapsedRealtime() // the screen stays lit for the look
+    }
+
+    /** The character on the screen: a diagnostic choice while it lasts, else the person's own. */
+    val shownCharacter: CharacterId get() = debugCharacter?.takeIf { SystemClock.elapsedRealtime() < debugUntil } ?: characterId
+
     fun expression(now: Long): Expression {
+        debugExpression?.takeIf { SystemClock.elapsedRealtime() < debugUntil }?.let { return it }
         val base = Reflexes.expression(now, lastWakeAt, Reflexes.present(now, lastFaceAt), lastActivityAt, watching = tracking, dimAfterMs = dimAfterMs)
         // A person who has sat too long: tired after the first reminder, exhausted after the final one (the wake word and speech still win).
         if (base != Expression.ATTENTIVE && base != Expression.NEUTRAL) return base

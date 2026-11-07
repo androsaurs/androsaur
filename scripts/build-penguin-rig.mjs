@@ -46,7 +46,8 @@ export function createPenguinRig({ outfit = 0 } = {}) {
   }
 
   // Upper body pivots at the hips.
-  const body = node('Upper body', root, 0, 0);
+  const figure = node('Figure', root); // the upper body sinks and leans from the hips as a whole; the legs stay planted
+  const body = node('Upper body', figure, 0, 0);
   const torso = node('Breathing torso', body);
   ellipse('Torso', torso, 0, TORSO.y, TORSO.w, TORSO.h, blue, { outline: rim });
   ellipse('Belly', torso, 0, TORSO.y + 8, 106, 118, belly);
@@ -76,9 +77,11 @@ export function createPenguinRig({ outfit = 0 } = {}) {
   for (const x of [-44, -16, 12, 40]) rect(`Scarf stripe ${x}`, scarf, x, TORSO.y - 14, 9, 28, 0xffd8f5e4);
 
   // Arms: short and thick, mitten hands. Shoulder (interaction/speaking) -> swing (idle).
+  const hangs = {};
   function arm(side, rest) {
     const s = side === 'Left' ? -1 : 1;
-    const shoulder = node(`${side} arm`, body, s * ARM.x, ARM.y, { rotation: rest });
+    hangs[side] = node(`${side} arm hang`, body, s * ARM.x, ARM.y); // tired poses let the arm hang from here
+    const shoulder = node(`${side} arm`, hangs[side], 0, 0, { rotation: rest });
     const swing = node(`${side} arm swing`, shoulder);
     ellipse(`${side} arm shape`, swing, 0, ARM.len / 2, ARM.w, ARM.len, blue, { outline: rim });
     // Sleeve: the arm shape grown by 6 px, its cuff clipped to it.
@@ -200,13 +203,15 @@ export function createPenguinRig({ outfit = 0 } = {}) {
 
   // NEUTRAL, ATTENTIVE, LISTENING, SLEEPY, SAD: face, tuft and posture.
   const E = (...values) => code => values[code];
-  const eyes = E(1, 1.08, 1.14, 0.1, 0.82);
-  const browY = E(-42, -49, -51, -39, -44), browTilt = E(0, 0, -0.08, 0.06, -0.4);
-  const beakDrop = E(30, 29, 29, 32, 33);
-  const tuftTilt = E(0, -0.05, 0.05, 0.5, 0.7), tuftLift = E(1, 1.1, 1.18, 0.85, 0.8);
-  const blush = E(0.75, 0.9, 0.85, 0.4, 0.3);
-  const headY = E(HEAD.y, HEAD.y - 4, HEAD.y - 3, HEAD.y + 5, HEAD.y + 7), headTilt = E(0, 0, 0.08, -0.05, 0.06);
-  rig.categoryLayer('expression', [0, 1, 2, 3, 4].map(c => pose(`expression ${CONTRACT.expression[c]}`, [
+  const eyes = E(1, 1.08, 1.14, 0.1, 0.82, 0.55, 0.08);
+  const browY = E(-42, -49, -51, -39, -44, -38, -36), browTilt = E(0, 0, -0.08, 0.06, -0.4, -0.48, -0.55);
+  const beakDrop = E(30, 29, 29, 32, 33, 34, 37);
+  const tuftTilt = E(0, -0.05, 0.05, 0.5, 0.7, 0.8, 1.0), tuftLift = E(1, 1.1, 1.18, 0.85, 0.8, 0.78, 0.7);
+  const blush = E(0.75, 0.9, 0.85, 0.4, 0.3, 0.3, 0.3);
+  const headY = E(HEAD.y, HEAD.y - 4, HEAD.y - 3, HEAD.y + 5, HEAD.y + 7, HEAD.y + 14, HEAD.y + 32), headTilt = E(0, 0, 0.08, -0.05, 0.06, 0.1, 0.3);
+  // Posture of the tired poses; every pose keys every property, so leaving one never leaves its values behind.
+  const sinkY = E(0, 0, 0, 0, 0, 10, 36), leanTilt = E(0, 0, 0, 0, 0, 0, 0.18), sinkScale = E(1, 1, 1, 1, 1, 0.97, 0.9), armHang = E(0, 0, 0, 0, 0, 0.1, 0.4);
+  rig.categoryLayer('expression', [0, 1, 2, 3, 4, 5, 6].map(c => pose(`expression ${CONTRACT.expression[c]}`, [
     [expressionEyes, P.scaleY, eyes(c)],
     [leftBrow, P.y, browY(c)], [rightBrow, P.y, browY(c)],
     [leftBrow, P.rotation, browTilt(c)], [rightBrow, P.rotation, -browTilt(c)],
@@ -214,6 +219,8 @@ export function createPenguinRig({ outfit = 0 } = {}) {
     [tuftPose, P.rotation, tuftTilt(c)], [tuftPose, P.scaleY, tuftLift(c)],
     [leftBlush.shape, P.opacity, blush(c)], [rightBlush.shape, P.opacity, blush(c)],
     [headPose, P.y, headY(c)], [headPose, P.rotation, headTilt(c)],
+    [figure, P.y, sinkY(c)], [figure, P.rotation, leanTilt(c)], [figure, P.scaleY, sinkScale(c)],
+    [hangs.Left, P.rotation, armHang(c)], [hangs.Right, P.rotation, -armHang(c)],
   ])));
 
   // IDLE, COMMAND, RECORDING, NOTE: the right hand goes up and waves.

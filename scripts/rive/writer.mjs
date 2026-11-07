@@ -295,6 +295,6 @@ export function createRig({ artboard, width = 480, height = 480, reversePoints =
 export const CONTRACT = {
   machine: 'Character',
   inputs: ['lookX', 'lookY', 'mouthOpen', 'expression', 'interaction', 'speaking', 'sleeping'],
-  expression: ['NEUTRAL', 'ATTENTIVE', 'LISTENING', 'SLEEPY', 'SAD'],
+  expression: ['NEUTRAL', 'ATTENTIVE', 'LISTENING', 'SLEEPY', 'SAD', 'TIRED', 'EXHAUSTED'],
   interaction: ['IDLE', 'COMMAND', 'RECORDING', 'NOTE'],
 };

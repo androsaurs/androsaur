@@ -44,7 +44,8 @@ export function createPufRig({ outfit = 0 } = {}) {
   }
   leg('Left'); leg('Right');
 
-  const body = node('Breathing body', root);
+  const figure = node('Figure', root); // the body sinks and leans as a whole; the legs stay planted
+  const body = node('Breathing body', figure);
   fluffy('Torso', body, 0, 76, 186, 168, fur, { puffs: 16, size: 0.26 });
   fluffy('Belly', body, 0, 88, 112, 104, cream, { puffs: 12, size: 0.2, jitter: 0.03 });
 
@@ -56,9 +57,11 @@ export function createPufRig({ outfit = 0 } = {}) {
   for (const x of [-48, -16, 16, 48]) rect(`Scarf stripe ${x}`, scarf, x, 22, 9, 30, 0xffffc2cb);
 
   // Arms: pivot at the shoulder, paws lighter. Rest pose angles outward a little.
+  const hangs = {};
   function arm(side, rest) {
     const s = side === 'Left' ? -1 : 1;
-    const shoulder = node(`${side} arm`, body, s * 78, 30, { rotation: rest });
+    hangs[side] = node(`${side} arm hang`, body, s * 78, 30); // tired poses let the arm hang from here
+    const shoulder = node(`${side} arm`, hangs[side], 0, 0, { rotation: rest });
     rect(`${side} upper arm`, shoulder, 0, 38, 42, 92, furArm, { radius: 21 });
     for (let k = 0; k < 4; k++) ellipse(`${side} arm puff ${k + 1}`, shoulder, s * 17, 10 + k * 22, 18, 18, furArm);
     ellipse(`${side} paw`, shoulder, 0, 84, 46, 40, furLight);
@@ -69,7 +72,8 @@ export function createPufRig({ outfit = 0 } = {}) {
 
   // Head with an idle bob and a gaze turn. Tufts are behind it, the face on top.
   const headIdle = node('Head idle', body, 0, -64);
-  const head = node('Head gaze', headIdle);
+  const headDroop = node('Head droop', headIdle); // the head sags and tilts (tired poses)
+  const head = node('Head gaze', headDroop);
 
   function tuft(side) {
     const s = side === 'Left' ? -1 : 1;
@@ -177,12 +181,15 @@ export function createPufRig({ outfit = 0 } = {}) {
 
   // NEUTRAL, ATTENTIVE, LISTENING, SLEEPY, SAD
   const E = (...values) => code => values[code];
-  const eyes = E(1, 1.08, 1.15, 0.1, 0.8);
-  const browY = E(-50, -57, -59, -47, -52), browTilt = E(0, 0, -0.08, 0.06, -0.38);
-  const mouthX = E(1, 1.12, 0.75, 0.6, 0.85), mouthY = E(1, 1.15, 0.8, 0.5, -0.8);
-  const tuftTilt = E(0.12, 0.04, 0.02, 0.6, 0.9), tuftLift = E(1, 1.06, 1.12, 0.9, 0.92);
-  const blush = E(0.7, 0.85, 0.8, 0.35, 0.3);
-  rig.categoryLayer('expression', [0, 1, 2, 3, 4].map(c => pose(`expression ${CONTRACT.expression[c]}`, [
+  const eyes = E(1, 1.08, 1.15, 0.1, 0.8, 0.55, 0.08);
+  const browY = E(-50, -57, -59, -47, -52, -46, -44), browTilt = E(0, 0, -0.08, 0.06, -0.38, -0.46, -0.52);
+  const mouthX = E(1, 1.12, 0.75, 0.6, 0.85, 0.8, 0.6), mouthY = E(1, 1.15, 0.8, 0.5, -0.8, -0.55, -0.4);
+  const tuftTilt = E(0.12, 0.04, 0.02, 0.6, 0.9, 1.0, 1.2), tuftLift = E(1, 1.06, 1.12, 0.9, 0.92, 0.88, 0.8);
+  const blush = E(0.7, 0.85, 0.8, 0.35, 0.3, 0.3, 0.3);
+  // Posture of the tired poses; every pose keys every property, so leaving one never leaves its values behind.
+  const sinkY = E(0, 0, 0, 0, 0, 12, 42), leanTilt = E(0, 0, 0, 0, 0, 0, 0.2), sinkScale = E(1, 1, 1, 1, 1, 0.97, 0.88);
+  const droopY = E(0, 0, 0, 0, 0, 10, 34), droopTilt = E(0, 0, 0, 0, 0, 0.08, 0.3), armHang = E(0, 0, 0, 0, 0, 0.12, 0.5);
+  rig.categoryLayer('expression', [0, 1, 2, 3, 4, 5, 6].map(c => pose(`expression ${CONTRACT.expression[c]}`, [
     [expressionEyes, P.scaleY, eyes(c)],
     [leftBrow, P.y, browY(c)], [rightBrow, P.y, browY(c)],
     [leftBrow, P.rotation, browTilt(c)], [rightBrow, P.rotation, -browTilt(c)],
@@ -190,6 +197,9 @@ export function createPufRig({ outfit = 0 } = {}) {
     [leftTuft.posed, P.rotation, -tuftTilt(c)], [rightTuft.posed, P.rotation, tuftTilt(c)],
     [leftTuft.posed, P.scaleY, tuftLift(c)], [rightTuft.posed, P.scaleY, tuftLift(c)],
     [leftBlush.shape, P.opacity, blush(c)], [rightBlush.shape, P.opacity, blush(c)],
+    [figure, P.y, sinkY(c)], [figure, P.rotation, leanTilt(c)], [figure, P.scaleY, sinkScale(c)],
+    [headDroop, P.y, droopY(c)], [headDroop, P.rotation, droopTilt(c)],
+    [hangs.Left, P.rotation, armHang(c)], [hangs.Right, P.rotation, -armHang(c)],
   ])));
 
   // IDLE, COMMAND, RECORDING, NOTE: tufts light up (red while recording), right arm goes up.

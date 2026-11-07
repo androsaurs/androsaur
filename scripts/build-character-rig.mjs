@@ -57,7 +57,7 @@ function ellipse(name, parent, x, y, w, h, tint, triangle = false) {
   object(18, { 5: fill, 37: tint });
   const attrs = `fill="#${(tint & 0xffffff).toString(16).padStart(6, '0')}"`;
   const mark = triangle ? `<polygon points="0,${-h/2} ${w/2},${h/2} ${-w/2},${h/2}" ${attrs}/>` : `<ellipse rx="${w/2}" ry="${h/2}" ${attrs}/>`;
-  const cls = name.includes('eye') || name.includes('pupil') || name.includes('glint') ? 'eye' : name === 'Mouth' ? 'mouth' : '';
+  const cls = name.includes('eye') || name.includes('pupil') || name.includes('glint') ? 'eye' : name === 'Mouth hole' ? 'mouth' : '';
   svg.push(`<g transform="${transforms.get(parent)} translate(${x} ${y})"><g class="${cls}">${mark}</g></g>`);
   return { shape, path };
 }
@@ -67,18 +67,22 @@ const pale = kind === 'cat' ? 0xfff1dfff : kind === 'dog' ? 0xffffe4bd : 0xffc9f
 const accent = kind === 'cat' ? 0xff9266d4 : kind === 'dog' ? 0xffaf673e : 0xff39ae7c;
 const root = node('Root', 0, 240, 240);
 ellipse('Shadow', root, 0, 190, 230, 20, 0xff142a22);
-const body = node('Breathing body', root, 0, 95);
+const figure = node('Figure', root); // slumps and leans as a whole (tired poses)
+const body = node('Breathing body', figure, 0, 95);
 ellipse('Tail', body, 87, 40, kind === 'dinosaur' ? 125 : 65, kind === 'cat' ? 95 : 48, accent);
 ellipse('Left foot', body, -56, 77, 76, 40, green);
 ellipse('Right foot', body, 56, 77, 76, 40, green);
 ellipse('Body', body, 0, 0, 170, 176, green);
 ellipse('Belly', body, 0, 15, 106, 126, pale);
-const leftArm = node('Left arm', body, -82, -20);
+const leftHang = node('Left arm hang', body, -82, -20); // the arm hangs from here (tired poses)
+const leftArm = node('Left arm', leftHang);
 ellipse('Left hand', leftArm, -9, 22, 40, 84, accent);
-const rightArm = node('Right arm', body, 82, -20);
+const rightHang = node('Right arm hang', body, 82, -20);
+const rightArm = node('Right arm', rightHang);
 ellipse('Right hand', rightArm, 9, 22, 40, 84, accent);
-const headMotion = node('Head idle', root, 0, -55);
-const head = node('Head gaze', headMotion);
+const headMotion = node('Head idle', figure, 0, -55);
+const headDroop = node('Head droop', headMotion); // the head sags and tilts (tired poses)
+const head = node('Head gaze', headDroop);
 const earY = kind === 'cat' ? -100 : kind === 'dog' ? 0 : -53;
 ellipse('Left ear', head, -106, earY, kind === 'cat' ? 78 : 60, kind === 'dog' ? 190 : kind === 'cat' ? 110 : 78, accent, kind === 'cat');
 ellipse('Right ear', head, 106, earY, kind === 'cat' ? 78 : 60, kind === 'dog' ? 190 : kind === 'cat' ? 110 : 78, accent, kind === 'cat');
@@ -112,7 +116,11 @@ const leftBrow = node('Left brow', head, -56, -84);
 ellipse('Left brow line', leftBrow, 0, 0, 47, 8, dark);
 const rightBrow = node('Right brow', head, 56, -84);
 ellipse('Right brow line', rightBrow, 0, 0, 47, 8, dark);
-const mouth = ellipse('Mouth', head, 0, 60, 66, 8, dark);
+// Mouth: a dark oval with a snout-coloured lid over its top makes a light crescent smile (as on Puf and the hamster). Speaking drops
+// the lid and opens the oval; a negative scaleY on the whole mouth turns the smile into a frown.
+const mouth = node('Mouth', head, 0, 60);
+const mouthHole = ellipse('Mouth hole', mouth, 0, 0, 54, 20, dark);
+const mouthLid = ellipse('Mouth lid', mouth, 0, -6, 64, 18, pale);
 const status = ellipse('Listening light', body, 0, -20, 18, 18, 0xffe6aa58);
 
 // Rive draws earlier components on top. Author back-to-front above, then reverse and remap
@@ -148,16 +156,27 @@ function blend(name, stops, makeTracks) {
 }
 blend('lookX', [-1, 1], v => [[pupils, 13, v * 13], [head, 13, v * 12], [head, 15, v * 0.045]]);
 blend('lookY', [-1, 1], v => [[pupils, 14, v * 12], [head, 14, v * 8]]);
-blend('mouthOpen', [0, 1], v => [[mouth.path, 21, 8 + v * 48]]);
-// Stable expression codes: NEUTRAL=0, ATTENTIVE=1, LISTENING=2, SLEEPY=3, SAD=4.
+blend('mouthOpen', [0, 1], v => [[mouthHole.path, 21, 20 + v * 36], [mouthHole.shape, 14, v * 6], [mouthLid.shape, 18, 1 - v]]);
+// Stable expression codes: NEUTRAL=0, ATTENTIVE=1, LISTENING=2, SLEEPY=3, SAD=4, TIRED=5, EXHAUSTED=6.
+// TIRED follows the first reminder to stop sitting (sad, weary, a little sagging), EXHAUSTED the final one (eyes shut, the
+// whole figure sinks and leans, the head droops, the arms hang limp: it is falling off its feet).
 // Expressions are categories, not a scale: a 1D blend from 0 to 4 would pass through every code
 // in between (NEUTRAL -> SAD closed the eyes at SLEEPY). Each code is its own state instead, and
 // Rive crossfades directly between any two of them. The app sets the code without animating it.
-const expressionPoses = [0, 1, 2, 3, 4].map(v => pose(`expression ${v}`, [
-  [expressionEyes, 17, [1, 1.06, 1.17, 0.12, 0.72][v]],
-  [leftBrow, 15, [0, -0.12, -0.22, 0.05, -0.3][v]],
-  [rightBrow, 15, [0, 0.12, 0.22, -0.05, 0.3][v]],
-  [mouth.shape, 16, [1, 1.18, 0.65, 0.8, 0.8][v]],
+// Every pose keys every property below, so leaving a pose never leaves a value of it behind.
+const expressionPoses = [0, 1, 2, 3, 4, 5, 6].map(v => pose(`expression ${v}`, [
+  [expressionEyes, 17, [1, 1.06, 1.17, 0.12, 0.72, 0.5, 0.08][v]],
+  [leftBrow, 15, [0, -0.12, -0.22, 0.05, -0.3, -0.38, -0.45][v]],
+  [rightBrow, 15, [0, 0.12, 0.22, -0.05, 0.3, 0.38, 0.45][v]],
+  [mouth, 16, [1, 1.12, 0.75, 0.6, 0.85, 0.8, 0.6][v]],
+  [mouth, 17, [1, 1.15, 0.8, 0.5, -0.8, -0.55, -0.4][v]],
+  [figure, 14, [0, 0, 0, 0, 0, 12, 42][v]],
+  [figure, 15, [0, 0, 0, 0, 0, 0, 0.2][v]],
+  [figure, 17, [1, 1, 1, 1, 1, 0.97, 0.88][v]],
+  [headDroop, 14, [0, 0, 0, 0, 0, 10, 34][v]],
+  [headDroop, 15, [0, 0, 0, 0, 0, 0.08, 0.3][v]],
+  [leftHang, 15, [0, 0, 0, 0, 0, 0.12, 0.5][v]],
+  [rightHang, 15, [0, 0, 0, 0, 0, -0.12, -0.5][v]],
 ]));
 const EXPRESSION_MIX_MS = 300;
 blend('interaction', [0, 1, 2, 3], v => [[status.shape, 18, [0, 1, 1, 0.4][v]], [rightArm, 15, [0, -0.5, -0.7, -0.2][v]]]);

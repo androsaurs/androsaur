@@ -152,9 +152,8 @@ internal fun RiveCharacter(
         Expression.LISTENING -> 2f
         Expression.SLEEPY -> 3f
         Expression.SAD -> 4f
-        // The rig has no poses of its own for these yet: the nearest ones (sad; the sleepy pose) stand in until they are drawn.
-        Expression.TIRED -> 4f
-        Expression.EXHAUSTED -> 3f
+        Expression.TIRED -> 5f
+        Expression.EXHAUSTED -> 6f
     }
     val sleeping by animateFloatAsState(if (state.sleeping) 1f else 0f, tween(300), label = "rive sleeping")
     var visible by remember(owner) { mutableStateOf(owner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) }

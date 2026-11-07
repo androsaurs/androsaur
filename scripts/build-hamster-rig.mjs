@@ -34,7 +34,8 @@ export function createHamsterRig({ outfit = 0 } = {}) {
   const root = node('Root', 0, 240, 240);
   ellipse('Shadow', root, 0, 196, 240, 22, 0xff1c140e);
 
-  const body = node('Breathing body', root);
+  const figure = node('Figure', root); // the body sinks and leans as a whole; the feet stay planted
+  const body = node('Breathing body', figure);
   fluffy('Body', body, 0, 78, 262, 218, fur, { puffs: 18, size: 0.2 });
   fluffy('Belly', body, 0, 100, 168, 150, cream, { puffs: 14, size: 0.17 });
   // Feet peek out in front of the round body.
@@ -46,7 +47,8 @@ export function createHamsterRig({ outfit = 0 } = {}) {
 
   // Head: idle bob, then gaze turn. Ears behind the head, face on top.
   const headIdle = node('Head idle', body, 0, -62);
-  const head = node('Head gaze', headIdle);
+  const headDroop = node('Head droop', headIdle); // the head sags and tilts (tired poses)
+  const head = node('Head gaze', headDroop);
 
   function ear(side) {
     const s = side === 'Left' ? -1 : 1;
@@ -110,9 +112,11 @@ export function createHamsterRig({ outfit = 0 } = {}) {
   const lid = ellipse('Mouth lid', mouth, 0, -6, 36, 14, cream);
 
   // Paws held at the chest, pivot at the shoulder. The seed outfit sits between them.
+  const hangs = {};
   function arm(side, rest) {
     const s = side === 'Left' ? -1 : 1;
-    const shoulder = node(`${side} arm`, body, s * 62, 26, { rotation: rest });
+    hangs[side] = node(`${side} arm hang`, body, s * 62, 26); // tired poses let the paw drop from here
+    const shoulder = node(`${side} arm`, hangs[side], 0, 0, { rotation: rest });
     rect(`${side} arm fur`, shoulder, 0, 26, 36, 62, furShade, { radius: 18 });
     ellipse(`${side} paw`, shoulder, 0, 56, 30, 24, pink);
     for (const t of [-1, 0, 1]) ellipse(`${side} finger ${t + 2}`, shoulder, t * 8, 66, 8, 8, pink);
@@ -170,13 +174,16 @@ export function createHamsterRig({ outfit = 0 } = {}) {
 
   // NEUTRAL, ATTENTIVE, LISTENING, SLEEPY, SAD
   const E = (...values) => code => values[code];
-  const eyes = E(1, 1.1, 1.15, 0.1, 0.85);
-  const browY = E(-46, -52, -54, -43, -48), browTilt = E(0, 0, -0.08, 0.06, -0.38);
-  const mouthX = E(1, 1.12, 0.75, 0.6, 0.85), mouthY = E(1, 1.15, 0.8, 0.5, -0.8);
-  const earTilt = E(0.15, 0.04, -0.02, 0.45, 0.6), earLift = E(1, 1.08, 1.14, 0.88, 0.85);
-  const cheekPuff = E(1, 1.06, 1.03, 0.97, 0.95);
-  const blush = E(0.6, 0.8, 0.75, 0.35, 0.25);
-  rig.categoryLayer('expression', [0, 1, 2, 3, 4].map(c => pose(`expression ${CONTRACT.expression[c]}`, [
+  const eyes = E(1, 1.1, 1.15, 0.1, 0.85, 0.55, 0.08);
+  const browY = E(-46, -52, -54, -43, -48, -42, -40), browTilt = E(0, 0, -0.08, 0.06, -0.38, -0.46, -0.52);
+  const mouthX = E(1, 1.12, 0.75, 0.6, 0.85, 0.8, 0.6), mouthY = E(1, 1.15, 0.8, 0.5, -0.8, -0.55, -0.4);
+  const earTilt = E(0.15, 0.04, -0.02, 0.45, 0.6, 0.7, 0.9), earLift = E(1, 1.08, 1.14, 0.88, 0.85, 0.82, 0.75);
+  const cheekPuff = E(1, 1.06, 1.03, 0.97, 0.95, 0.93, 0.9);
+  const blush = E(0.6, 0.8, 0.75, 0.35, 0.25, 0.25, 0.25);
+  // Posture of the tired poses; every pose keys every property, so leaving one never leaves its values behind.
+  const sinkY = E(0, 0, 0, 0, 0, 12, 40), leanTilt = E(0, 0, 0, 0, 0, 0, 0.2), sinkScale = E(1, 1, 1, 1, 1, 0.97, 0.9);
+  const droopY = E(0, 0, 0, 0, 0, 10, 30), droopTilt = E(0, 0, 0, 0, 0, 0.08, 0.3), armDrop = E(0, 0, 0, 0, 0, 0.3, 0.9);
+  rig.categoryLayer('expression', [0, 1, 2, 3, 4, 5, 6].map(c => pose(`expression ${CONTRACT.expression[c]}`, [
     [expressionEyes, P.scaleY, eyes(c)],
     [leftBrow, P.y, browY(c)], [rightBrow, P.y, browY(c)],
     [leftBrow, P.rotation, browTilt(c)], [rightBrow, P.rotation, -browTilt(c)],
@@ -185,6 +192,9 @@ export function createHamsterRig({ outfit = 0 } = {}) {
     [leftEar.posed, P.scaleY, earLift(c)], [rightEar.posed, P.scaleY, earLift(c)],
     [cheeks, P.scaleX, cheekPuff(c)], [cheeks, P.scaleY, cheekPuff(c)],
     [leftBlush.shape, P.opacity, blush(c)], [rightBlush.shape, P.opacity, blush(c)],
+    [figure, P.y, sinkY(c)], [figure, P.rotation, leanTilt(c)], [figure, P.scaleY, sinkScale(c)],
+    [headDroop, P.y, droopY(c)], [headDroop, P.rotation, droopTilt(c)],
+    [hangs.Left, P.rotation, armDrop(c)], [hangs.Right, P.rotation, -armDrop(c)],
   ])));
 
   // IDLE, COMMAND, RECORDING, NOTE: the right paw goes up; ears perk while listening.
