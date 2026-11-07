@@ -131,6 +131,7 @@ class Brain(context: Context) {
         prefs.edit().putString("character_mode", mode.name).apply()
     }
     val hub = HubClient(context, prefs)
+    private val profiler = Profiler { hub.sendTrace(it) }.also { p -> p.onRun = { hub.traceRun = it } }
     val weatherSource = WeatherSource(context, prefs)
     /** The weather to show under the clock, or null when there is none (no place known, nothing fetched, or too old). */
     var weather by mutableStateOf<WeatherReading?>(null); private set
@@ -510,6 +511,7 @@ class Brain(context: Context) {
                 audioClient.post("/ring", JSONObject().put("seconds", 60))
             }
             val (intent, data) = commands.poll() ?: continue
+            profiler.app("command_taken", "intent" to intent)
             lastActivityAt = SystemClock.elapsedRealtime()
             val now = java.time.ZonedDateTime.now()
             when (intent) {
@@ -557,8 +559,10 @@ class Brain(context: Context) {
     private fun announce(data: JSONObject) {
         val id = data.optString("announceId")
         val wav = audioClient.getBytes("/announce/audio?id=$id")
+        profiler.app("wav_fetched", "bytes" to (wav?.size ?: 0))
         if (wav == null) { say(AnnounceAnswers.forStatus("error")); return }
         val reply = hub.announce(data.optString("roomId"), data.optString("person"), data.optString("personId"), wav)
+        profiler.app("hub_replied", "status" to (reply?.first ?: "no reply"))
         audioClient.post("/announce/delete", JSONObject().put("id", id))
         say(AnnounceAnswers.forStatus(reply?.first, data.optString("room"), reply?.second))
     }
@@ -567,14 +571,18 @@ class Brain(context: Context) {
     private fun thing(kind: String, data: JSONObject) {
         val id = data.optString("announceId")
         val wav = audioClient.getBytes("/announce/audio?id=$id")
+        profiler.app("wav_fetched", "bytes" to (wav?.size ?: 0))
         if (wav == null) { say(ThingAnswers.forReply(ThingReply("error"))); return }
         val reply = hub.things(kind, data.optString("person"), data.optString("personId"), wav)
+        profiler.app("hub_replied", "status" to (reply?.status ?: "no reply"))
         audioClient.post("/announce/delete", JSONObject().put("id", id))
         say(ThingAnswers.forReply(reply))
     }
 
     private fun say(text: String) {
+        profiler.app("say_requested", "chars" to text.length)
         val reply = audioClient.post("/speak", JSONObject().put("text", text))
+        profiler.app("say_accepted", "code" to (reply?.first ?: 0))
         if (reply == null || reply.first != 200) note = "Не сказал: ${reply?.second?.optString("error") ?: "звук не отвечает"}"
     }
 
@@ -938,6 +946,7 @@ class Brain(context: Context) {
     }
 
     private fun pollEvents() {
+        profiler.flush()
         if (!audio.running) return
         val events = audioClient.get("/events?after=${if (lastEventId < 0) Long.MAX_VALUE else lastEventId}")?.second
         if (lastEventId < 0) {
@@ -949,6 +958,7 @@ class Brain(context: Context) {
         for (i in 0 until list.length()) {
             val e = list.getJSONObject(i)
             lastEventId = maxOf(lastEventId, e.optLong("id"))
+            profiler.audio(e)
             when (e.optString("type")) {
                 "command" -> e.optJSONObject("data")?.let { d -> greetingInterrupt.incrementAndGet(); commands.add(d.optString("intent") to d) }
                 "ring_started" -> { ringing = true; lastActivityAt = SystemClock.elapsedRealtime() }

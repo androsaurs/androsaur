@@ -173,6 +173,15 @@ class HubClient(context: Context, private val prefs: SharedPreferences) {
     fun things(kind: String, from: String, fromId: String, wav: ByteArray): ThingReply? =
         postVoice("/api/device/things/$kind", from, fromId, wav)?.let { ThingReply(it.optString("status").ifEmpty { "error" }, it.text("text"), it.text("previous")) }
 
+    /** The run the next request belongs to (set by the profiler): sent as a header so the hub files its own timings under it. */
+    @Volatile var traceRun: String = ""
+
+    /** Stage marks for the hub's profiling page; no answer is needed, a lost batch is lost. */
+    fun sendTrace(events: JSONArray) {
+        val base = url.ifEmpty { return }
+        call("POST", "$base/api/device/trace", JSONObject().put("device", deviceId).put("events", events))
+    }
+
     private fun JSONObject.text(name: String): String? = optString(name).takeIf { it.isNotEmpty() && !isNull(name) }
 
     /** A recorded voice for the hub to make sense of: the hub's JSON answer, `{"status": "error"}` for an HTTP error, null when it did not answer. */
@@ -184,6 +193,7 @@ class HubClient(context: Context, private val prefs: SharedPreferences) {
             connection = (URL("$base$path?$q").openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"; connectTimeout = 3000; readTimeout = 30_000; doOutput = true
                 setRequestProperty("Content-Type", "audio/wav")
+                traceRun.takeIf { it.isNotEmpty() }?.let { setRequestProperty("X-Trace-Run", it) }
                 outputStream.use { it.write(wav) }
             }
             if (connection.responseCode != 200) return JSONObject().put("status", "error")
