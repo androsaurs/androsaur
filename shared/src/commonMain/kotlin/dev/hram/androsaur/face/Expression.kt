@@ -1,7 +1,11 @@
 package dev.hram.androsaur.face
 
 /** What the face on the screen shows. */
-enum class Expression { NEUTRAL, ATTENTIVE, LISTENING, SLEEPY, SAD }
+/**
+ * [TIRED] and [EXHAUSTED] are the character after the first and the final reminder to stop sitting (see health/Sitting.kt): sad and weary,
+ * then falling off its feet. They come from the sitting session, not from [Reflexes.expression].
+ */
+enum class Expression { NEUTRAL, ATTENTIVE, LISTENING, SLEEPY, SAD, TIRED, EXHAUSTED }
 
 /**
  * The "reflexes": quick rules that turn what the modules report into an expression and a gaze, with no LLM in between.

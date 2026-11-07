@@ -8,7 +8,13 @@ import androidx.compose.runtime.setValue
 import dev.hram.androsaur.delivery.Delivery
 import dev.hram.androsaur.delivery.DeliveryGate
 import dev.hram.androsaur.delivery.WaitingNote
+import dev.hram.androsaur.face.Expression
 import dev.hram.androsaur.face.Reflexes
+import dev.hram.androsaur.health.SittingCell
+import dev.hram.androsaur.health.SittingRules
+import dev.hram.androsaur.health.SittingSettings
+import dev.hram.androsaur.health.SittingState
+import dev.hram.androsaur.health.SittingTexts
 import dev.hram.androsaur.character.CharacterMode
 import dev.hram.androsaur.character.CharacterState
 import dev.hram.androsaur.character.CharacterId
@@ -230,6 +236,7 @@ class Brain(context: Context) {
         launch { followPersonalChoices() }
         launch { followMouth() }
         launch { deliverNotes() }
+        launch { watchSitting() }
         launch { shareContext() }
         launch { syncHub() }
         launch { followAudioSettings() }
@@ -325,6 +332,8 @@ class Brain(context: Context) {
                 if (it.toString() != lastMedicationLog) { lastMedicationLog = it.toString(); android.util.Log.i("Medication", "plans from the hub: ${it.length()} people, ${(0 until it.length()).sumOf { i -> it.getJSONObject(i).optJSONArray("times")?.length() ?: 0 }} times") }
             }
             flushMedication()
+            reply.sitting?.let { prefs.edit().putString("sitting_plans", it.toString()).apply() }
+            flushSitting()
             acceptCharacters(request, reply.characters, reply.accessories)
             uploadNotes()
             done = reply.commands.map { HubClient.Done(it.id, execute(it)) }
@@ -861,6 +870,129 @@ class Brain(context: Context) {
         say("Хорошо, отмечено.")
     }
 
+    // --- «don't sit for hours» ---
+
+    /** Reminder level of the person in front of the camera now (0 none, 1 tired, 2 exhausted); the face shows it. */
+    @Volatile private var sittingLevel = 0
+    private val sittingLock = Any()
+    private val sittingStates = HashMap<String, SittingState>()
+    private val sittingCells = LinkedHashMap<String, SittingCell>() // «person|bucket» → cell
+    private var sittingLoaded = false
+
+    private fun sittingSettings(personId: String): SittingSettings? {
+        val plans = runCatching { JSONArray(prefs.getString("sitting_plans", "[]") ?: "[]") }.getOrDefault(JSONArray())
+        for (i in 0 until plans.length()) {
+            val p = plans.getJSONObject(i)
+            if (p.optString("person") == personId) return SittingSettings(p.optInt("firstMin", 40), p.optInt("repeatMin", 20), p.optInt("breakMin", 5))
+        }
+        return null
+    }
+
+    /** Loads what was kept across a restart (the session and the cells not yet sent); call under [sittingLock]. */
+    private fun loadSitting() {
+        if (sittingLoaded) return
+        sittingLoaded = true
+        runCatching {
+            val states = JSONObject(prefs.getString("sitting_state", "{}") ?: "{}")
+            for (id in states.keys()) states.getJSONObject(id).let { sittingStates[id] = SittingState(it.optLong("s"), it.optLong("l"), it.optInt("v"), it.optBoolean("p")) }
+            val cells = JSONArray(prefs.getString("sitting_cells", "[]") ?: "[]")
+            for (i in 0 until cells.length()) cells.getJSONObject(i).let { sittingCells["${it.getString("person")}|${it.getString("bucket")}"] = SittingCell(it.optInt("presentS"), it.optInt("streakMin"), it.optInt("level")) }
+        }
+    }
+
+    private fun sittingState(personId: String): SittingState = synchronized(sittingLock) { loadSitting(); sittingStates[personId] ?: SittingState() }
+
+    private fun saveSitting() = synchronized(sittingLock) {
+        val states = JSONObject()
+        sittingStates.forEach { (id, st) -> states.put(id, JSONObject().put("s", st.startMs).put("l", st.lastSeenMs).put("v", st.level).put("p", st.praise)) }
+        val cells = JSONArray()
+        sittingCells.entries.toList().takeLast(300).forEach { (key, c) ->
+            val (person, bucket) = key.split("|", limit = 2)
+            cells.put(JSONObject().put("person", person).put("bucket", bucket).put("presentS", c.presentS).put("streakMin", c.streakMin).put("level", c.level))
+        }
+        prefs.edit().putString("sitting_state", states.toString()).putString("sitting_cells", cells.toString()).apply()
+    }
+
+    private fun bucketKey(now: java.time.LocalDateTime): String =
+        MedicationSchedule.key(now.toLocalDate().toEpochDay() to (now.hour * 60 + now.minute) / 15 * 15)
+
+    /**
+     * Once a second, for the person the camera has recognised: keeps the session (the first sight, the break, the level) and the
+     * 15-minute cells of the heat map. It does not speak: the reminders are said in [deliverNotes] when nothing else is going on.
+     */
+    private suspend fun watchSitting() {
+        var last = SystemClock.elapsedRealtime()
+        var lastSave = last
+        while (true) {
+            delay(1000)
+            val mono = SystemClock.elapsedRealtime()
+            val seconds = ((mono - last) / 1000).toInt().coerceIn(1, 5)
+            last = mono
+            val id = badgeId
+            val settings = if (id != null && badge.isNotEmpty() && badge != UNKNOWN && Reflexes.badgeVisible(mono, recognizedAt, lastFaceAt)) sittingSettings(id) else null
+            if (id == null || settings == null) { sittingLevel = 0; continue }
+            val now = System.currentTimeMillis()
+            val state = synchronized(sittingLock) {
+                loadSitting()
+                SittingRules.seen(settings, sittingStates[id] ?: SittingState(), now).also { sittingStates[id] = it }
+            }
+            sittingLevel = state.level
+            val key = "$id|${bucketKey(java.time.LocalDateTime.now())}"
+            synchronized(sittingLock) { sittingCells[key] = (sittingCells[key] ?: SittingCell()).add(seconds, SittingRules.minutes(state, now), state.level) }
+            if (mono - lastSave > 20_000) { saveSitting(); lastSave = mono }
+        }
+    }
+
+    /**
+     * «Ты сидишь уже 40 минут…» and the final reminder, or «Молодец, отдохнул» for a person who came back after a break while tired. Marked
+     * as soon as it is spoken. Returns whether it spoke.
+     */
+    private suspend fun remindSitting(personId: String, name: String): Boolean {
+        val settings = sittingSettings(personId) ?: return false
+        val now = System.currentTimeMillis()
+        val state = sittingState(personId)
+        val text: String
+        val after: (SittingState) -> SittingState
+        if (state.praise) {
+            text = SittingTexts.RESTED
+            after = SittingRules::praised
+        } else {
+            val level = SittingRules.reminderDue(settings, state, now)
+            if (level == 0) return false
+            text = SittingTexts.reminder(level, name, SittingRules.minutes(state, now))
+            after = { SittingRules.reminded(it, level) }
+        }
+        val token = greetingInterrupt.get()
+        val reply = audioClient.post("/speak", JSONObject().put("text", text))
+        if (reply == null || reply.first != 200) return false
+        synchronized(sittingLock) { sittingStates[personId] = after(sittingStates[personId] ?: state) }
+        saveSitting()
+        android.util.Log.i("Sitting", "$personId: ${if (state.praise) "rested" else "reminder"} (session ${SittingRules.minutes(state, now)} min)")
+        note = "Не засиживаться: $name"
+        waitForReminder(personId, token)
+        return true
+    }
+
+    /** Sends the cells the hub has not got; the finished ones are forgotten once it took them, the current one keeps growing. */
+    private fun flushSitting() {
+        val cells = synchronized(sittingLock) {
+            loadSitting()
+            JSONArray().also { out ->
+                sittingCells.entries.toList().takeLast(300).forEach { (key, c) ->
+                    val (person, bucket) = key.split("|", limit = 2)
+                    out.put(JSONObject().put("person", person).put("bucket", bucket).put("presentS", c.presentS.coerceAtMost(900)).put("streakMin", c.streakMin).put("level", c.level))
+                }
+            }
+        }
+        if (cells.length() == 0) return
+        val sent = hub.postSitting(cells)
+        android.util.Log.i("Sitting", "cells to the hub: ${cells.length()} -> ${if (sent) "taken" else "not taken, will retry"}")
+        if (!sent) return
+        val current = bucketKey(java.time.LocalDateTime.now())
+        synchronized(sittingLock) { sittingCells.keys.removeAll { it.substringAfter("|") < current } }
+        saveSitting()
+    }
+
     private fun greetingStillFor(personId: String, token: Long): Boolean = MorningHoroscope.stillFor(
         personId, badgeId, tracking && Reflexes.present(SystemClock.elapsedRealtime(), lastFaceAt),
         interrupted = token != greetingInterrupt.get() || !greetingOn || mode.isNotEmpty() || ringing,
@@ -943,6 +1075,10 @@ class Brain(context: Context) {
                 speaking || mode.isNotEmpty() || ringing) continue
             // The medicine reminder: once in an interval, when the camera first sees the person in it (after the greeting, before the notes).
             badgeId?.let { id -> if (remindMedication(id, name)) lastActivityAt = SystemClock.elapsedRealtime() }
+            if (badgeId != personBeforeGreeting || badgeText(SystemClock.elapsedRealtime()) != name ||
+                speaking || mode.isNotEmpty() || ringing) continue
+            // «Don't sit for hours»: the reminders and «Молодец, отдохнул» (the session itself is kept by watchSitting).
+            badgeId?.let { id -> if (remindSitting(id, name)) lastActivityAt = SystemClock.elapsedRealtime() }
             if (badgeId != personBeforeGreeting || badgeText(SystemClock.elapsedRealtime()) != name ||
                 speaking || mode.isNotEmpty() || ringing) continue
             if (!gate.shouldCheck(name, now)) continue
@@ -1141,5 +1277,10 @@ class Brain(context: Context) {
     private companion object { const val IDENTIFY_MS = 3500L; const val RETRY_IDENTIFY_MS = 6000L
         const val RECHECK_MS = 2000L; const val RECHECK_EVERY_MS = 5000L; const val UNKNOWN = "Не узнаю"; const val HUB_EVERY_MS = 30_000L }
 
-    fun expression(now: Long) = Reflexes.expression(now, lastWakeAt, Reflexes.present(now, lastFaceAt), lastActivityAt, watching = tracking, dimAfterMs = dimAfterMs)
+    fun expression(now: Long): Expression {
+        val base = Reflexes.expression(now, lastWakeAt, Reflexes.present(now, lastFaceAt), lastActivityAt, watching = tracking, dimAfterMs = dimAfterMs)
+        // A person who has sat too long: tired after the first reminder, exhausted after the final one (the wake word and speech still win).
+        if (base != Expression.ATTENTIVE && base != Expression.NEUTRAL) return base
+        return when (sittingLevel) { 1 -> Expression.TIRED; 2 -> Expression.EXHAUSTED; else -> base }
+    }
 }

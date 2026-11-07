@@ -80,6 +80,8 @@ class HubClient(context: Context, private val prefs: SharedPreferences) {
         val rooms: JSONArray? = null,
         /** Medicine schedules of the people of the house (person, name, times); null — the hub did not send them, keep the last ones. */
         val medications: JSONArray? = null,
+        /** «Don't sit for hours» settings of the people it is on for (person, name, firstMin, repeatMin, breakMin); null — keep the last ones. */
+        val sitting: JSONArray? = null,
     )
 
     /** Whom the camera knows, for the hub: [people] are objects with id, name, samples and digest (no sets); [faceModel] is the camera's face model. */
@@ -133,9 +135,10 @@ class HubClient(context: Context, private val prefs: SharedPreferences) {
         val accessories = parseAccessories(body)
         val rooms = body.optJSONArray("rooms")
         val medications = body.optJSONArray("medications")
-        if (config.toString() == stored().toString()) return Result.success(Reply(null, commands, peopleRev, upload, place, weather, texts, roles, characters, accessories, rooms, medications))
+        val sitting = body.optJSONArray("sitting")
+        if (config.toString() == stored().toString()) return Result.success(Reply(null, commands, peopleRev, upload, place, weather, texts, roles, characters, accessories, rooms, medications, sitting))
         prefs.edit().putString(KEY_CONFIG, config.toString()).apply()
-        return Result.success(Reply(config, commands, peopleRev, upload, place, weather, texts, roles, characters, accessories, rooms, medications))
+        return Result.success(Reply(config, commands, peopleRev, upload, place, weather, texts, roles, characters, accessories, rooms, medications, sitting))
     }
 
     /** Hands the hub the sets of the people it asked for (the camera's export, filtered). The sets are never logged. */
@@ -189,6 +192,12 @@ class HubClient(context: Context, private val prefs: SharedPreferences) {
     fun postMedication(events: JSONArray): Boolean {
         val base = url.ifEmpty { return false }
         return call("POST", "$base/api/device/medication", JSONObject().put("device", deviceId).put("events", events))?.first == 204
+    }
+
+    /** Sends the 15-minute cells of sitting (person, bucket, presentS, streakMin, level); true when the hub took them. */
+    fun postSitting(buckets: JSONArray): Boolean {
+        val base = url.ifEmpty { return false }
+        return call("POST", "$base/api/device/sitting", JSONObject().put("device", deviceId).put("buckets", buckets))?.first == 204
     }
 
     private fun JSONObject.text(name: String): String? = optString(name).takeIf { it.isNotEmpty() && !isNull(name) }
