@@ -632,7 +632,7 @@ class Brain(context: Context) {
         if (staged != null && sceneName != null && staged.supportsAccessory(requested)) {
             sceneAccessory = accessoryTarget(sceneAccessory, requested, wear)
             refreshCharacters.trySend(Unit)
-            say(if (requested == CharacterAccessory.GLASSES) (if (wear) "Надел очки." else "Снял очки.") else if (wear) "Готово." else "Снял.")
+            say(accessoryAnswer(requested, wear))
             return
         }
         val person = badgeId?.takeIf { tracking && Reflexes.present(now, lastFaceAt) }
@@ -666,7 +666,12 @@ class Brain(context: Context) {
         }
         setPersonalAccessory(person, character, target)
         say(if (characterMode == CharacterMode.SIMPLE) "Сохранил. Внешний вид персонажа виден в сложном режиме."
-            else if (wear) when (requested) {
+            else accessoryAnswer(requested, wear))
+    }
+
+    /** What is said after an outfit change: «Надел очки.», «Снял бантик.» … */
+    private fun accessoryAnswer(requested: CharacterAccessory, wear: Boolean): String =
+        if (wear) when (requested) {
                 CharacterAccessory.GLASSES -> "Надел очки."
                 CharacterAccessory.BOW -> "Надел бантик."
                 CharacterAccessory.SCARF -> "Повязал шарфик."
@@ -688,8 +693,7 @@ class Brain(context: Context) {
                 CharacterAccessory.CAP -> "Снял кепку."
                 CharacterAccessory.HOODIE -> "Снял толстовку."
                 CharacterAccessory.NONE -> "Снял все аксессуары."
-            })
-    }
+            }
 
     private suspend fun followWeather() {
         while (true) {
