@@ -21,6 +21,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.graphics.Color
+import dev.hram.androsaur.character.CharacterId
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
@@ -68,7 +74,7 @@ class MainActivity : ComponentActivity() {
         registerReceiver(object : android.content.BroadcastReceiver() {
             override fun onReceive(c: android.content.Context, i: Intent) { brain.debugFace(i.getStringExtra("character"), i.getStringExtra("expression"), i.getIntExtra("seconds", 30)) }
         }, android.content.IntentFilter("dev.hram.androsaur.DEBUG_FACE"), "android.permission.DUMP", null, android.content.Context.RECEIVER_EXPORTED)
-        // Staged scene for demo recordings: `adb shell am broadcast -a dev.hram.androsaur.DEBUG_SCENE --es step face_in --es name Женя` (steps: face_in, face_out, wake, command, say, note, sleep, reset). DUMP only.
+        // Staged scene for demo recordings: `adb shell am broadcast -a dev.hram.androsaur.DEBUG_SCENE --es step face_in --es name Женя` (steps: face_in, face_out, wake, command, say, note, mode, sleep, reset). DUMP only.
         registerReceiver(object : android.content.BroadcastReceiver() {
             override fun onReceive(c: android.content.Context, i: Intent) {
                 val data = i.getStringExtra("data").orEmpty().split(';').mapNotNull { kv -> kv.split('=', limit = 2).takeIf { it.size == 2 }?.let { it[0] to it[1] } }.toMap()
@@ -105,6 +111,19 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+private val SCREEN_BASE = Color(0xff040a08)
+
+/** The glow colour of each character (the screen background fades from it to the dark base). */
+private fun glowOf(character: CharacterId): Color = when (character) {
+    CharacterId.DINOSAUR -> Color(0xff165a3e)
+    CharacterId.CAT -> Color(0xff583c78)
+    CharacterId.DOG -> Color(0xff6e461e)
+    CharacterId.PUF -> Color(0xff463c82)
+    CharacterId.HAMSTER -> Color(0xff6e5532)
+    CharacterId.PENGUIN -> Color(0xff1e4682)
+    CharacterId.PENGUIN2 -> Color(0xff1e5f6e)
+}
+
 @Composable
 private fun Screen(brain: Brain, dim: (Boolean) -> Unit, openWeather: () -> Unit, background: (() -> Unit) -> Unit) {
     // Only the face by default; a touch shows the panel with the modules and the buttons (for looking and for the odd manual start).
@@ -115,7 +134,12 @@ private fun Screen(brain: Brain, dim: (Boolean) -> Unit, openWeather: () -> Unit
     LaunchedEffect(Unit) { while (true) { now = SystemClock.elapsedRealtime(); delay(100) } }
     val dimmed = character.dimmed
     LaunchedEffect(dimmed) { dim(dimmed) }
-    Box(Modifier.fillMaxSize().testTag("assistant-screen").background(Color.Black).clickable { brain.touch(); panel = !panel }) {
+    // The glow behind the character takes the colour of the one on the screen and changes smoothly with it.
+    val glow by animateColorAsState(glowOf(brain.shownCharacter), tween(700), label = "glow")
+    Box(Modifier.fillMaxSize().testTag("assistant-screen").background(SCREEN_BASE).drawBehind {
+        // A dark background with a glow behind the character, as in the demo videos (scripts/demo/layouts/tall-b.json).
+        drawRect(Brush.radialGradient(listOf(lerp(SCREEN_BASE, glow, 0.67f), lerp(SCREEN_BASE, glow, 0.22f), SCREEN_BASE), center = Offset(size.width / 2, size.height * 0.62f), radius = size.height * 0.6f))
+    }.clickable { brain.touch(); panel = !panel }) {
         Column(Modifier.fillMaxSize().safeDrawingPadding()) {
             Column(Modifier.weight(if (panel) 0.5f else 1f).fillMaxWidth()) {
                 Clock(now, compact = panel, weather = brain.weather, timerEndsAt = brain.timerEndsAt, ringing = brain.ringing, onWeather = openWeather)
