@@ -1,0 +1,176 @@
+{
+  "title": {
+    "en": "Androsaur: Hamster's outfits",
+    "ru": "Androsaur: наряды Хомяка"
+  },
+  "duration": 22,
+  "chip": {
+    "en": "Androsaur · open source project",
+    "ru": "Androsaur · открытый проект"
+  },
+  "layout": "tall-b",
+  "setup": [
+    {
+      "step": "reset"
+    },
+    {
+      "step": "sleep"
+    }
+  ],
+  "settle": 4,
+  "scenes": [
+    {
+      "from": 0.8,
+      "to": 3.8,
+      "title": {
+        "en": "Outfits",
+        "ru": "Наряды"
+      },
+      "en": "Hamster changes clothes by voice.",
+      "ru": "Хомяк переодевается по голосу.",
+      "do": [
+        {
+          "dt": 1.5,
+          "step": "wake",
+          "text": "Зюзя"
+        }
+      ]
+    },
+    {
+      "from": 4.2,
+      "to": 6.4,
+      "title": {
+        "en": "Hamster",
+        "ru": "Хомяк"
+      },
+      "en": "Three outfits",
+      "ru": "Три наряда",
+      "do": [
+        {
+          "dt": -0.2,
+          "step": "profile",
+          "data": "character=hamster"
+        },
+        {
+          "dt": -0.1,
+          "step": "face_in",
+          "name": "Саша",
+          "id": "p-hamster"
+        },
+        {
+          "dt": 0.5,
+          "step": "say",
+          "text": "Привет, я Хомяк."
+        }
+      ]
+    },
+    {
+      "from": 6.6,
+      "to": 9.2,
+      "title": {
+        "en": "Hamster",
+        "ru": "Хомяк"
+      },
+      "label": {
+        "ru": "Вы",
+        "en": "You"
+      },
+      "en": "“Put on the glasses”",
+      "ru": "«Надень очки»",
+      "do": [
+        {
+          "dt": 0.3,
+          "step": "command",
+          "intent": "character_accessory",
+          "data": "accessory=glasses;wear=true;personId=p-hamster"
+        }
+      ]
+    },
+    {
+      "from": 9.4,
+      "to": 12.0,
+      "title": {
+        "en": "Hamster",
+        "ru": "Хомяк"
+      },
+      "label": {
+        "ru": "Вы",
+        "en": "You"
+      },
+      "en": "“Put on the bow”",
+      "ru": "«Надень бантик»",
+      "do": [
+        {
+          "dt": 0.3,
+          "step": "command",
+          "intent": "character_accessory",
+          "data": "accessory=bow;wear=true;personId=p-hamster"
+        }
+      ]
+    },
+    {
+      "from": 12.2,
+      "to": 14.8,
+      "title": {
+        "en": "Hamster",
+        "ru": "Хомяк"
+      },
+      "label": {
+        "ru": "Вы",
+        "en": "You"
+      },
+      "en": "“Take a seed”",
+      "ru": "«Возьми семечку»",
+      "do": [
+        {
+          "dt": 0.3,
+          "step": "command",
+          "intent": "character_accessory",
+          "data": "accessory=seed;wear=true;personId=p-hamster"
+        }
+      ]
+    },
+    {
+      "from": 15.0,
+      "to": 17.2,
+      "title": {
+        "en": "Hamster",
+        "ru": "Хомяк"
+      },
+      "label": {
+        "ru": "Вы",
+        "en": "You"
+      },
+      "en": "“Take everything off”",
+      "ru": "«Сними всё»",
+      "do": [
+        {
+          "dt": 0.3,
+          "step": "command",
+          "intent": "character_accessory",
+          "data": "accessory=none;wear=false;personId=p-hamster"
+        }
+      ]
+    },
+    {
+      "from": 17.4,
+      "to": 23.4,
+      "title": {
+        "en": "Own look",
+        "ru": "Свой вид"
+      },
+      "en": "Three outfits for Hamster. Everything runs on the phone.",
+      "ru": "Три наряда для Хомяка. Всё работает на телефоне.",
+      "do": [
+        {
+          "dt": -0.4,
+          "step": "face_out"
+        },
+        {
+          "dt": 0.6,
+          "step": "sleep"
+        }
+      ]
+    }
+  ]
+}
