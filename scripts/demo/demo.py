@@ -145,7 +145,7 @@ def load_layout(name):
     return json.load(open(os.path.join(HERE, "layouts", name + ".json"), encoding="utf-8"))
 
 
-def glow_background(L, chip_text, phone_box):
+def glow_background(L, chip_text, phone_box, footer=True):
     """Тёмный фон с зелёным свечением, плашка проекта вверху и тень под телефоном (вертикальный кадр)."""
     from PIL import Image, ImageDraw, ImageFilter, ImageFont
     W, H = L["canvas"]; bg, c = L["background"], L["chip"]
@@ -156,7 +156,11 @@ def glow_background(L, chip_text, phone_box):
     x, y, w, h = phone_box; above, below = L["phone"]["shadow_above"], L["phone"]["shadow_below"]
     sh = Image.new("L", (W, H), 0); ImageDraw.Draw(sh).ellipse((x - 10, y + h - above, x + w + 10, y + h + below), fill=200)
     img.paste(Image.new("RGB", (W, H), (0, 0, 0)), (0, 0), sh.filter(ImageFilter.GaussianBlur(18)))
-    d = ImageDraw.Draw(img); f = ImageFont.truetype(L["font"], c["size"]); cw = d.textlength(chip_text, font=f) + 70
+    d = ImageDraw.Draw(img)
+    ft = L.get("footer")  # строка внизу кадра (адрес проекта)
+    if ft and footer: d.text((W / 2, ft["y"]), ft["text"], font=ImageFont.truetype(L["font"], ft["size"]), fill=tuple(ft["color"]), anchor="mm")
+    if not c.get("show", True): return img  # шаблон без плашки проекта
+    f = ImageFont.truetype(L["font"], c["size"]); cw = d.textlength(chip_text, font=f) + 70
     top = c["y"]
     d.rounded_rectangle((W / 2 - cw / 2, top, W / 2 + cw / 2, top + c["height"]), radius=c["height"] // 2, fill=tuple(c["fill"]), outline=tuple(c["outline"]), width=2)
     d.ellipse((W / 2 - cw / 2 + 24, top + 24, W / 2 - cw / 2 + 36, top + 36), fill=tuple(c["dot"]))
@@ -191,12 +195,141 @@ def caption_layer(L, title, text, label=None):
     return img
 
 
+def load_regions():
+    """Области экрана для приближения (layouts/regions.json): центр и ширина как доли экрана телефона."""
+    return json.load(open(os.path.join(HERE, "layouts", "regions.json"), encoding="utf-8"))
+
+
+def source_size(src):
+    """Размер записи (ширина, высота) из вывода ffmpeg."""
+    import re
+    err = subprocess.run([ffmpeg(), "-hide_banner", "-i", src], capture_output=True, text=True).stderr
+    m = re.search(r"Video:.*?, (\d{3,5})x(\d{3,5})", err)
+    return (int(m.group(1)), int(m.group(2))) if m else (1080, 2460)
+
+
+def view_state(view, L, screen_rect, src_wh, regions):
+    """Вид камеры: (окно на кадре, масштаб, центр в записи, видна ли рамка телефона). `full` — весь экран в рамке телефона,
+    область из regions.json — широкое окно без рамки (stage в шаблоне), записи приближается так, чтобы область заняла окно."""
+    SW, SH = src_wh
+    if view == "full": return screen_rect, screen_rect[2] / SW, (SW / 2, SH / 2), 1.0
+    reg = view if isinstance(view, dict) else regions[view]; st = L["stage"]
+    return (st["x"], st["y"], st["w"], st["h"]), st["w"] / (SW * reg["w"]), (reg["cx"] * SW, reg["cy"] * SH), 0.0
+
+
+def extend_edges(tile, pos, canvas, q=4, blur=14):
+    """Продолжает вырезанный кусок экрана на весь кадр: крайние пиксели тянутся наружу, углы заливаются цветом угла, всё слегка
+    размывается. Фон вокруг окна — это сам кадр приложения, а не подобранный цвет: шва нет по построению.
+    Считается в 1/q размера (фон гладкий) и растягивается."""
+    from PIL import Image, ImageFilter
+    W, H = canvas; w, h = W // q, H // q
+    small = tile.reduce(q); sw, sh = small.size
+    x, y = round(pos[0] / q), round(pos[1] / q); rx, by = x + sw, y + sh
+    low = Image.new("RGB", (w, h))
+    if x > 0: low.paste(small.crop((0, 0, 1, sh)).resize((x, sh), Image.NEAREST), (0, y))
+    if rx < w: low.paste(small.crop((sw - 1, 0, sw, sh)).resize((w - rx, sh), Image.NEAREST), (rx, y))
+    if y > 0: low.paste(small.crop((0, 0, sw, 1)).resize((sw, y), Image.NEAREST), (x, 0))
+    if by < h: low.paste(small.crop((0, sh - 1, sw, sh)).resize((sw, h - by), Image.NEAREST), (x, by))
+    for (cx0, cy0, cx1, cy1), px in (((0, 0, x, y), (0, 0)), ((rx, 0, w, y), (sw - 1, 0)), ((0, by, x, h), (0, sh - 1)), ((rx, by, w, h), (sw - 1, sh - 1))):
+        if cx1 > cx0 and cy1 > cy0: low.paste(small.getpixel(px), (cx0, cy0, cx1, cy1))
+    low.paste(small, (x, y))
+    return low.filter(ImageFilter.GaussianBlur(blur)).resize((W, H), Image.BILINEAR)
+
+
+def edge_signature(tile):
+    """Отпечаток краёв окна (по 12 пикселей на сторону): по нему видно, что края изменились и фон надо строить заново."""
+    from PIL import Image
+    w, h = tile.size; B = Image.BOX
+    strips = (tile.crop((0, 0, w, 6)).resize((12, 1), B), tile.crop((0, h - 6, w, h)).resize((12, 1), B),
+              tile.crop((0, 0, 6, h)).resize((1, 12), B), tile.crop((w - 6, 0, w, h)).resize((1, 12), B))
+    return b"".join(x.tobytes() for x in strips)
+
+
+def camera_at(t, keys, states):
+    """Положение камеры в момент t: от прошлого вида к текущему за `dur` с плавным разгоном и торможением.
+    Окно и центр меняются линейно, масштаб геометрически (приближение ощущается равномерным); рамка гаснет в начале
+    приближения и появляется в конце отдаления."""
+    i = max(j for j, k in enumerate(keys) if k[0] <= t)
+    t0, _, dur = keys[i]
+    p = 1.0 if i == 0 else min(1.0, max(0.0, (t - t0) / dur)); p = p * p * (3 - 2 * p)
+    (w0, s0, c0, b0), (w1, s1, c1, b1) = states[max(i - 1, 0)], states[i]
+    lerp = lambda a, b: a + (b - a) * p
+    bez = b0 + (b1 - b0) * min(1.0, max(0.0, (p * 2) if b1 < b0 else (p - 0.5) * 2))
+    mix = 1 - lerp(b0, b1)  # доля фона приложения: растёт вместе с приближением
+    return tuple(lerp(a, b) for a, b in zip(w0, w1)), s0 * (s1 / s0) ** p, (lerp(c0[0], c1[0]), lerp(c0[1], c1[1])), bez, mix
+
+
+def compose_tall_camera(sc, src, lang, out, layout):
+    """Вертикальный шортс с «камерой»: ролик начинается с телефона целиком, по `view` у сцены приближается к области экрана
+    (персонаж, часы, погода, календарь…), рамка телефона при этом исчезает. Запись берётся в родном размере."""
+    from PIL import Image, ImageDraw
+    L = load_layout(layout); W, H = L["canvas"]; FPS = 30
+    ph = L["phone"]; body, top, bz = ph["body_height"], ph["top"], ph["bezel"]
+    frame_png, bw, sw, sh = phone_frame(body, bezel=bz)
+    px = (W - bw) // 2
+    screen = (px + bz, top + bz, sw, sh)
+    SW, SH = source_size(src); regions = load_regions()
+    bg = glow_background(L, sc["chip"][lang], (px, top, bw, body), footer=False).convert("RGB")
+    footer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    if L.get("footer"):  # строка внизу кадра не должна перетекать вместе с фоном: рисуется поверх
+        from PIL import ImageFont
+        ft = L["footer"]; ImageDraw.Draw(footer).text((W / 2, ft["y"]), ft["text"], font=ImageFont.truetype(L["font"], ft["size"]), fill=tuple(ft["color"]) + (255,), anchor="mm")
+    bezel_img = Image.open(frame_png).convert("RGBA")
+    keys = [(0.0, "full", 1.0)] + [(c["from"], c["view"], c.get("view_dur", 1.0)) for c in sc["subtitles"] if "view" in c]
+    states = [view_state(v, L, screen, (SW, SH), regions) for _, v, _ in keys]
+    def with_footer(layer): l = footer.copy(); l.alpha_composite(layer); return l
+    layers = [(c["from"], c["to"], with_footer(caption_layer(L, c["title"][lang], c[lang], (c.get("label") or {}).get(lang)))) for c in sc["subtitles"]]
+    dec = subprocess.Popen([ffmpeg(), "-loglevel", "error", "-i", src, "-vf", f"fps={FPS}", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE)
+    enc = subprocess.Popen([ffmpeg(), "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", str(FPS), "-i", "-",
+                            "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-an", out], stdin=subprocess.PIPE)
+    size, n, masks, cache = SW * SH * 3, 0, {}, None
+    while True:
+        buf = dec.stdout.read(size)
+        if len(buf) < size: break
+        t = n / FPS
+        (wx, wy, ww, wh), s, (cx, cy), bez, mix = camera_at(t, keys, states)
+        ww, wh = round(ww), round(wh)
+        cw, ch = ww / s, wh / s
+        x0 = min(max(cx - cw / 2, 0), max(SW - cw, 0)); y0 = min(max(cy - ch / 2, 0), max(SH - ch, 0))
+        raw = Image.frombytes("RGB", (SW, SH), buf)
+        tile = raw.resize((ww, wh), Image.LANCZOS, box=(x0, y0, min(x0 + cw, SW), min(y0 + ch, SH)))
+        # наезд переводит фон кадра из зелёного свечения в продолжение самого окна (его края тянутся на весь кадр), за то же время
+        # Пока камера стоит и края окна не изменились (фон приложения спокоен), фон не считается заново, берётся прошлый кадр
+        if mix > 0.005:
+            geom, sig = (round(wx), round(wy), ww, wh), edge_signature(tile)
+            if not (cache and cache["geom"] == geom and abs(cache["mix"] - mix) < 1e-3 and max(abs(a - b) for a, b in zip(cache["sig"], sig)) <= 2):
+                ext = extend_edges(tile, (round(wx), round(wy)), (W, H))
+                cache = {"geom": geom, "sig": sig, "mix": mix, "img": Image.blend(bg, ext, min(1.0, mix)).convert("RGBA")}
+            img = cache["img"].copy()
+        else: img = bg.convert("RGBA")
+        # без рамки края окна размываются (по бокам сильнее, сверху и снизу слабее: там голова персонажа и подпись): персонаж плавает в свечении фона
+        feather = round(24 * (1 - bez))
+        if feather >= 2:
+            key = (ww, wh, feather)
+            if key not in masks:
+                from PIL import ImageFilter
+                m = Image.new("L", (ww, wh), 0)
+                ImageDraw.Draw(m).rounded_rectangle((feather, round(feather * 0.5), ww - 1 - feather, wh - 1 - round(feather * 0.2)), radius=feather, fill=255)
+                masks[key] = m.filter(ImageFilter.GaussianBlur(feather * 0.45))
+            img.paste(tile, (round(wx), round(wy)), masks[key])
+        else: img.paste(tile, (round(wx), round(wy)))
+        if bez > 0.01:
+            b = bezel_img if (ww, wh) == (sw, sh) else bezel_img.resize((ww + 2 * bz, wh + 2 * bz), Image.LANCZOS)
+            if bez < 0.99: b = b.copy(); b.putalpha(b.getchannel("A").point(lambda v: int(v * bez)))
+            img.alpha_composite(b, (round(wx) - bz, round(wy) - bz))
+        img.alpha_composite(next((l for f, e, l in layers if f <= t < e), footer))
+        enc.stdin.write(img.convert("RGB").tobytes()); n += 1
+    enc.stdin.close(); enc.wait(); dec.wait()
+    return enc.returncode == 0 and n > 0
+
+
 def compose_tall(sc, src, lang, out, layout="tall-b"):
     """Вертикальный шортс по шаблону layouts/<layout>.json.
     Кадры собираются потоком: ffmpeg лишь декодирует запись и кодирует результат, наложение делает Python по одному кадру
     (память не растёт; граф ffmpeg с зацикленными картинками съедал гигабайты)."""
     from PIL import Image
     L = load_layout(layout); W, H = L["canvas"]; FPS = 30
+    if "stage" in L and any("view" in c for c in sc["subtitles"]): return compose_tall_camera(sc, src, lang, out, layout)
     ph = L["phone"]; body, top, bz = ph["body_height"], ph["top"], ph["bezel"]
     frame_png, bw, sw, sh = phone_frame(body, bezel=bz)
     px = (W - bw) // 2
@@ -240,15 +373,16 @@ def compose_wide(sc, src, lang, out, name):
     return r.returncode == 0
 
 
-def compose(path, langs=("en", "ru"), kinds=("wide", "tall")):
+def compose(path, langs=("en", "ru"), kinds=("wide", "tall"), layout=None):
     sc = load_scenario(path)
     src = os.path.join(RAW, name_of(path) + ".mp4")
     if not os.path.exists(src): sys.exit(f"нет {src}: сначала record")
     os.makedirs(OUT, exist_ok=True)
     for lang in langs:
         for kind in kinds:
-            out = os.path.join(OUT, f"{name_of(path)}-{kind}-{lang}.mp4")
-            ok = compose_wide(sc, src, lang, out, name_of(path)) if kind == "wide" else compose_tall(sc, src, lang, out, sc.get("layout", "tall-b"))
+            # --layout пробует другой шаблон, не трогая ролик со своим: файл получает имя шаблона
+            out = os.path.join(OUT, f"{name_of(path)}-{layout}-{lang}.mp4" if layout and kind == "tall" else f"{name_of(path)}-{kind}-{lang}.mp4")
+            ok = compose_wide(sc, src, lang, out, name_of(path)) if kind == "wide" else compose_tall(sc, src, lang, out, layout or sc.get("layout", "tall-b"))
             print(("собрано: " if ok else "ОШИБКА: ") + out)
     for f in os.listdir(OUT):
         if f.startswith((".frame-", ".bg-")): os.remove(os.path.join(OUT, f))
@@ -265,9 +399,9 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser()
     p.add_argument("cmd", choices=["record", "compose", "all", "frames"])
     p.add_argument("target"); p.add_argument("times", nargs="*")
-    p.add_argument("--device")
+    p.add_argument("--device"); p.add_argument("--layout", help="шаблон из layouts/ вместо указанного в сценарии (для пробы)")
     p.add_argument("--lang", choices=["en", "ru"]); p.add_argument("--kind", choices=["wide", "tall"])
     a = p.parse_args()
     if a.cmd in ("record", "all"): record(a.target, pick_device(a.device))
-    if a.cmd in ("compose", "all"): compose(a.target, (a.lang,) if a.lang else ("en", "ru"), (a.kind,) if a.kind else ("wide", "tall"))
+    if a.cmd in ("compose", "all"): compose(a.target, (a.lang,) if a.lang else ("en", "ru"), (a.kind,) if a.kind else ("wide", "tall"), a.layout)
     if a.cmd == "frames": frames(a.target, a.times)

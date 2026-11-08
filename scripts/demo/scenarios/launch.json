@@ -8,7 +8,7 @@
     "en": "Androsaur · open source project",
     "ru": "Androsaur · открытый проект"
   },
-  "layout": "tall-b",
+  "layout": "tall-c",
   "setup": [
     {
       "step": "reset"
@@ -52,7 +52,8 @@
           "step": "wake",
           "text": "Зюзя"
         }
-      ]
+      ],
+      "view": "character"
     },
     {
       "from": 8.2,
@@ -138,7 +139,8 @@
           "dt": 0.5,
           "step": "sleep"
         }
-      ]
+      ],
+      "view": "full"
     }
   ]
 }
