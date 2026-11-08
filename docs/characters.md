@@ -168,9 +168,9 @@ none/glasses/bow/scarf/crown/seed в пределах возможностей �
 Пересборка ригов и SVG (из корня `androsaur`, каталоги репозиториев соседние):
 
 ```sh
-node scripts/build-character-rig.mjs androidApp/src/main/res/raw/androsaur_character.riv dinosaur ../androsaur-hub/app/static/characters/dinosaur.svg
-node scripts/build-character-rig.mjs androidApp/src/main/res/raw/androsaur_cat.riv cat ../androsaur-hub/app/static/characters/cat.svg
-node scripts/build-character-rig.mjs androidApp/src/main/res/raw/androsaur_dog.riv dog ../androsaur-hub/app/static/characters/dog.svg
+node scripts/build-dinosaur-rig.mjs androidApp/src/main/res/raw/androsaur_character.riv --preview=../androsaur-hub/app/static/characters/dinosaur.svg
+node scripts/build-cat-rig.mjs androidApp/src/main/res/raw/androsaur_cat.riv --preview=../androsaur-hub/app/static/characters/cat.svg
+node scripts/build-dog-rig.mjs androidApp/src/main/res/raw/androsaur_dog.riv --preview=../androsaur-hub/app/static/characters/dog.svg
 ```
 
 Нативный тест `CharacterRigTest` загружает все пять файлов и прогоняет весь контракт,
@@ -251,7 +251,7 @@ Artboard: `Androsaur`. State machine: `Character`.
 Коды 5 и 6 показываются после первого и после финального напоминания не засиживаться (`health/Sitting.kt`): персонаж
 грустный и уставший (тяжёлые веки, брови домиком, голова чуть клонится, корпус слегка оседает), затем валится с ног
 (глаза сощурены, корпус оседает и кренится, голова падает набок, руки обвисают); после перерыва сразу обычный.
-У скрипта динозавра/кошки/собаки (`scripts/build-character-rig.mjs`) для этого добавлены узлы-обёртки `Figure`, `Head droop`,
+У скриптов динозавра/кошки/собаки (общее ядро `scripts/rive/animal.mjs` поверх `scripts/rive/writer.mjs`) для этого добавлены узлы-обёртки `Figure`, `Head droop`,
 `Left/Right arm hang`: они не заняты другими слоями (взгляд, дыхание, речь), поэтому поза не спорит с ними. Каждая поза
 выражения задаёт все свои свойства, иначе после ухода из неё остались бы значения предыдущей. Те же две позы есть у всех семи персонажей: у Пуфа, хомяка и двух пингвинов
 их скрипты получили такие же узлы-обёртки (`Figure`, `Head droop` или поза головы/лица, `… arm/flipper hang`), корпус пингвинов
@@ -294,7 +294,8 @@ controller остаётся активным для статической пе�
 
 ## Исходник пробного рига
 
-Авторский исходник — `scripts/build-character-rig.mjs`. Скрипт не требует
+Авторский исходник динозавра, кошки и собаки — общее ядро `scripts/rive/animal.mjs` поверх `scripts/rive/writer.mjs` и по файлу на персонажа
+(`build-dinosaur-rig.mjs`, `build-cat-rig.mjs`, `build-dog-rig.mjs`: палитра, хвост, уши, нос). Скрипты не требуют
 внешних пакетов и записывает небольшой runtime-файл Rive v7 из фигур, ключевых
 кадров и слоёв смешивания. Численные идентификаторы объектов и полей взяты
 из публичного формата `rive-app/rive-runtime`; стороннего рисунка нет.
@@ -306,7 +307,7 @@ controller остаётся активным для статической пе�
 Перегенерация из корня репозитория:
 
 ```sh
-node scripts/build-character-rig.mjs
+node scripts/build-dinosaur-rig.mjs   # или build-cat-rig.mjs, build-dog-rig.mjs
 ```
 
 Для другого персонажа можно создать риг в редакторе Rive и заменить `.riv`,

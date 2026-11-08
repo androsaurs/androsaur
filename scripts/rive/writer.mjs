@@ -27,7 +27,7 @@ const PROPERTY_TYPES = {
 export const P = { x: 13, y: 14, rotation: 15, scaleX: 16, scaleY: 17, opacity: 18, width: 20, height: 21 };
 
 const TYPE = {
-  backboard: 23, artboard: 1, node: 2, shape: 3, ellipse: 4, rectangle: 7, fill: 20, stroke: 24, solidColor: 18,
+  backboard: 23, artboard: 1, node: 2, shape: 3, ellipse: 4, triangle: 8, rectangle: 7, fill: 20, stroke: 24, solidColor: 18,
   linearAnimation: 31, keyedObject: 25, keyedProperty: 26, keyFrameDouble: 30,
   clippingShape: 42, radialGradient: 17, gradientStop: 19, pointsPath: 16, straightVertex: 5, smoothVertex: 35,
   stateMachine: 53, numberInput: 56, layer: 57, anyState: 62, exitState: 64, entryState: 63,
@@ -111,6 +111,8 @@ export function createRig({ artboard, width = 480, height = 480, reversePoints =
   const clip = (target, source) => add(TYPE.clippingShape, { 5: target, 92: source });
   const ellipse = (...args) => shape(TYPE.ellipse, ...args);
   const rect = (...args) => shape(TYPE.rectangle, ...args);
+  // An isosceles triangle with its apex up, w wide and h tall (cat ears).
+  const triangle = (...args) => shape(TYPE.triangle, ...args);
   // A closed outline through corner and smooth points: beaks, webbed feet, pear-shaped bodies.
   const outline = (name, parent, x, y, points, color, opts) => shape(TYPE.pointsPath, name, parent, x, y, points, 0, color, opts);
 
@@ -209,7 +211,7 @@ export function createRig({ artboard, width = 480, height = 480, reversePoints =
       return [Math.cos(t) * sx, Math.sin(t) * sx, -Math.sin(t) * sy, Math.cos(t) * sy, props[P.x] ?? 0, props[P.y] ?? 0];
     };
     const world = id => id === 0 ? [1, 0, 0, 1, 0, 0] : mul(world(components[id - 1].props[5]), matrixOf(components[id - 1].props));
-    const pathOf = id => components.find(c => c.props[5] === id && [TYPE.ellipse, TYPE.rectangle, TYPE.pointsPath].includes(c.type));
+    const pathOf = id => components.find(c => c.props[5] === id && [TYPE.ellipse, TYPE.triangle, TYPE.rectangle, TYPE.pointsPath].includes(c.type));
     // A closed outline through [x, y, cornerRadius] points: each corner is rounded by cutting it back `r` along both edges.
     function outlinePath(path) {
       const pathId = components.indexOf(path) + 1;
@@ -242,6 +244,7 @@ export function createRig({ artboard, width = 480, height = 480, reversePoints =
     const geometry = (path, attrs) => {
       if (path.type === TYPE.pointsPath) return `<path d="${outlinePath(path)}" ${attrs}/>`;
       const w = path.props[P.width], h = path.props[P.height];
+      if (path.type === TYPE.triangle) return `<polygon points="0,${-h / 2} ${w / 2},${h / 2} ${-w / 2},${h / 2}" ${attrs}/>`;
       return path.type === TYPE.ellipse
         ? `<ellipse rx="${w / 2}" ry="${h / 2}" ${attrs}/>`
         : `<rect x="${-w / 2}" y="${-h / 2}" width="${w}" height="${h}" rx="${path.props[31] ?? 0}" ${attrs}/>`;
@@ -288,7 +291,7 @@ export function createRig({ artboard, width = 480, height = 480, reversePoints =
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escape(artboard)}">${style}${defs.length ? `<defs>${defs.join('')}</defs>` : ''}${body}</svg>`;
   }
 
-  return { node, ellipse, rect, outline, clip, animation, pose, input, blendLayer, categoryLayer, build, svg, P };
+  return { node, ellipse, triangle, rect, outline, clip, animation, pose, input, blendLayer, categoryLayer, build, svg, P };
 }
 
 // The contract RiveCharacter.kt relies on. Codes are stable: persist and send them as is.
