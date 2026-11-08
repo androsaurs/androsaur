@@ -1,0 +1,263 @@
+{
+  "title": {
+    "en": "Androsaur: the dinosaur's animation",
+    "ru": "Androsaur: анимация динозавра"
+  },
+  "duration": 49.5,
+  "chip": {
+    "en": "Androsaur · open source project",
+    "ru": "Androsaur · открытый проект"
+  },
+  "layout": "tall-b",
+  "setup": [
+    {
+      "step": "reset"
+    },
+    {
+      "step": "face",
+      "seconds": 0
+    },
+    {
+      "step": "profile",
+      "data": "character=dinosaur"
+    },
+    {
+      "step": "sleep"
+    }
+  ],
+  "settle": 4,
+  "scenes": [
+    {
+      "from": 0.8,
+      "to": 4.2,
+      "title": {
+        "en": "Asleep",
+        "ru": "Спит"
+      },
+      "en": "Nobody around: it sleeps, perfectly still.",
+      "ru": "Никого нет: спит, замер."
+    },
+    {
+      "from": 4.6,
+      "to": 8.4,
+      "title": {
+        "en": "Wakes up",
+        "ru": "Просыпается"
+      },
+      "en": "Hears its name and wakes: eyes open, attentive.",
+      "ru": "Услышал имя — проснулся, смотрит внимательно.",
+      "label": {
+        "en": "You",
+        "ru": "Вы"
+      },
+      "do": [
+        {
+          "dt": -0.2,
+          "step": "wake",
+          "text": "Зюзя"
+        },
+        {
+          "dt": 1.2,
+          "step": "face_in",
+          "name": "Маша",
+          "id": "p-dino"
+        }
+      ]
+    },
+    {
+      "from": 8.8,
+      "to": 13.2,
+      "title": {
+        "en": "Talks",
+        "ru": "Говорит"
+      },
+      "en": "Mouth moves with the speech, a paw gestures.",
+      "ru": "Рот двигается в такт речи, лапка жестикулирует.",
+      "label": {
+        "en": "Zyuzya",
+        "ru": "Зюзя"
+      },
+      "do": [
+        {
+          "dt": -0.1,
+          "step": "say",
+          "text": "Привет! Я Зюзя, ваш домашний помощник."
+        }
+      ]
+    },
+    {
+      "from": 13.6,
+      "to": 18.0,
+      "title": {
+        "en": "Note",
+        "ru": "Записка"
+      },
+      "en": "A note is playing: the paw goes up.",
+      "ru": "Играет записка: лапка поднята.",
+      "do": [
+        {
+          "dt": -0.2,
+          "step": "note",
+          "text": "Записка для Маши"
+        },
+        {
+          "dt": -0.2,
+          "step": "mode",
+          "text": "note"
+        }
+      ]
+    },
+    {
+      "from": 18.4,
+      "to": 21.6,
+      "title": {
+        "en": "Calm",
+        "ru": "Спокойный"
+      },
+      "en": "Calm and friendly.",
+      "ru": "Спокойный и дружелюбный.",
+      "do": [
+        {
+          "dt": -0.6,
+          "step": "mode",
+          "text": ""
+        },
+        {
+          "dt": -0.5,
+          "step": "sleep"
+        },
+        {
+          "dt": -0.1,
+          "step": "face",
+          "expression": "neutral",
+          "character": "dinosaur",
+          "seconds": 4
+        }
+      ]
+    },
+    {
+      "from": 22.0,
+      "to": 25.2,
+      "title": {
+        "en": "Listening",
+        "ru": "Слушает"
+      },
+      "en": "Listening for a command: eyes wide, paw up, crest glows.",
+      "ru": "Слушает команду: глаза шире, лапка поднята, гребень светится.",
+      "do": [
+        {
+          "dt": -0.3,
+          "step": "face",
+          "seconds": 0
+        },
+        {
+          "dt": -0.2,
+          "step": "mode",
+          "text": "command"
+        }
+      ]
+    },
+    {
+      "from": 25.6,
+      "to": 28.8,
+      "title": {
+        "en": "Sleepy",
+        "ru": "Засыпает"
+      },
+      "en": "Sleepy: heavy eyelids.",
+      "ru": "Засыпает: тяжёлые веки.",
+      "do": [
+        {
+          "dt": -0.4,
+          "step": "mode",
+          "text": ""
+        },
+        {
+          "dt": -0.1,
+          "step": "face",
+          "expression": "sleepy",
+          "character": "dinosaur",
+          "seconds": 4
+        }
+      ]
+    },
+    {
+      "from": 29.2,
+      "to": 32.4,
+      "title": {
+        "en": "Sad",
+        "ru": "Грустит"
+      },
+      "en": "Sad: brows up, a frown, the tail droops.",
+      "ru": "Грустит: брови домиком, рот скобкой, хвост опущен.",
+      "do": [
+        {
+          "dt": -0.1,
+          "step": "face",
+          "expression": "sad",
+          "character": "dinosaur",
+          "seconds": 4
+        }
+      ]
+    },
+    {
+      "from": 32.8,
+      "to": 38.0,
+      "title": {
+        "en": "Tired",
+        "ru": "Устал"
+      },
+      "en": "Tired of sitting: nods off, eyes watery, a drop of sweat.",
+      "ru": "Устал сидеть: клюёт носом, глаза влажные, капля пота.",
+      "do": [
+        {
+          "dt": -0.1,
+          "step": "face",
+          "expression": "tired",
+          "character": "dinosaur",
+          "seconds": 6
+        }
+      ]
+    },
+    {
+      "from": 38.4,
+      "to": 44.6,
+      "title": {
+        "en": "Exhausted",
+        "ru": "Валится с ног"
+      },
+      "en": "Falls off its feet: sits down, eyes shut, dreams of a walk.",
+      "ru": "Валится с ног: сел, глаза закрыты, мечтает выйти погулять.",
+      "do": [
+        {
+          "dt": -0.1,
+          "step": "face",
+          "expression": "exhausted",
+          "character": "dinosaur",
+          "seconds": 7
+        }
+      ]
+    },
+    {
+      "from": 45.0,
+      "to": 49.0,
+      "title": {
+        "en": "Back to sleep",
+        "ru": "И снова спит"
+      },
+      "en": "Everything runs on the phone.",
+      "ru": "Всё работает на телефоне.",
+      "do": [
+        {
+          "dt": -0.3,
+          "step": "face",
+          "seconds": 0
+        },
+        {
+          "dt": 0.2,
+          "step": "sleep"
+        }
+      ]
+    }
+  ]
+}

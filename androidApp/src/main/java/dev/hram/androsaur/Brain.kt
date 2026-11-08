@@ -292,7 +292,7 @@ class Brain(context: Context) {
         while (true) {
             val reply = if (audio.running) audioClient.get("/speech")?.second else null
             speaking = reply?.optBoolean("speaking") == true
-            mode = reply?.optString("mode").orEmpty()
+            mode = sceneMode ?: reply?.optString("mode").orEmpty()
             if (mode.isNotEmpty()) lastActivityAt = SystemClock.elapsedRealtime()
             mouth = if (speaking) reply!!.optDouble("mouth", 0.0).toFloat() else 0f
             if (speaking) lastActivityAt = SystemClock.elapsedRealtime()
@@ -1316,6 +1316,8 @@ class Brain(context: Context) {
     // A staged person has their own character and outfit; nothing of it is saved, so the family's real choices stay as they are.
     @Volatile private var sceneCharacter: CharacterId? = null
     @Volatile private var sceneAccessory = CharacterAccessory.NONE
+    // The audio module's mode (command, recording, note) as the scene stages it; null: the real one.
+    @Volatile private var sceneMode: String? = null
 
     fun scene(step: String, name: String?, id: String?, text: String?, intent: String?, data: Map<String, String>) {
         val now = SystemClock.elapsedRealtime()
@@ -1329,8 +1331,9 @@ class Brain(context: Context) {
             // The broadcast arrives on the main thread, where a network call is refused: the speech request goes from a worker.
             "say" -> text?.let { t -> Thread { say(t) }.start() }
             "note" -> { note = text; lastActivityAt = now }
+            "mode" -> sceneMode = text?.ifEmpty { null }
             "sleep" -> { sceneName = null; sceneId = null; face = null; lastFaceAt = null; badge = ""; badgeId = null; recognizedAt = null; note = null; lastActivityAt = now - dimAfterMs - 60_000L }
-            "reset" -> { sceneName = null; sceneId = null; note = null; sceneCharacter = null; sceneAccessory = CharacterAccessory.NONE }
+            "reset" -> { sceneName = null; sceneId = null; note = null; sceneMode = null; sceneCharacter = null; sceneAccessory = CharacterAccessory.NONE }
         }
     }
 

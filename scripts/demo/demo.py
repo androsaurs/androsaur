@@ -33,12 +33,18 @@ def pick_device(arg):
 
 
 def scene(device, step):
-    cmd = ["shell", "am", "broadcast", "-a", "dev.hram.androsaur.DEBUG_SCENE", "--es", "step", step["step"]]
-    for key in ("name", "id", "text", "intent", "data"):
-        if key in step: cmd += ["--es", key, str(step[key])]
-    # am разбирает аргументы через shell телефона: кириллицу и пробелы берём в кавычки
-    adb(device, "shell", " ".join(["am", "broadcast", "-a", "dev.hram.androsaur.DEBUG_SCENE", "--es", "step", step["step"]] +
-        sum([["--es", k, "'" + str(step[k]).replace("'", "") + "'"] for k in ("name", "id", "text", "intent", "data") if k in step], [])))
+    """Один шаг на телефон. `face` — позa персонажа приёмником DEBUG_FACE (expression, character, seconds; seconds=0 снимает позу),
+    остальные шаги — приёмник DEBUG_SCENE. am разбирает аргументы через shell телефона: кириллицу и пробелы берём в кавычки."""
+    q = lambda v: "'" + str(v).replace("'", "") + "'"
+    if step["step"] == "face":
+        cmd = ["am", "broadcast", "-a", "dev.hram.androsaur.DEBUG_FACE", "--ei", "seconds", str(int(step.get("seconds", 60)))]
+        for key in ("expression", "character"):
+            if key in step: cmd += ["--es", key, q(step[key])]
+    else:
+        cmd = ["am", "broadcast", "-a", "dev.hram.androsaur.DEBUG_SCENE", "--es", "step", step["step"]]
+        for key in ("name", "id", "text", "intent", "data"):
+            if key in step: cmd += ["--es", key, q(step[key])]
+    adb(device, "shell", " ".join(cmd))
 
 
 def load_scenario(path):
@@ -77,6 +83,7 @@ def record(path, device):
         scene(device, step)
     rec.wait()
     time.sleep(1)
+    scene(device, {"step": "face", "seconds": 0})  # снять позу DEBUG_FACE, если сцена её ставила
     scene(device, {"step": "reset"})
     dest = os.path.join(RAW, name_of(path) + ".mp4")
     adb(device, "pull", remote, dest); adb(device, "shell", "rm", remote)
