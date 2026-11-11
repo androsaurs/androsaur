@@ -1,100 +1,107 @@
 # Androsaur
 
-**Домашний голосовой ассистент из старого Android-телефона.** На экране живой персонаж: он слышит своё имя, узнаёт людей в лицо,
-передаёт записки, говорит время и погоду. Распознавание и команды работают прямо на телефоне, без облака.
+**English** | [Русский](README.ru.md)
 
-<p align="center"><img src="docs/img/demo.gif" alt="Демо: телефон узнаёт человека, динозавр сменяется его личным персонажем, звучит записка" width="360"></p>
+**A home voice assistant built from an old Android phone.** A living character on the screen hears its name, recognizes people by
+face, passes on notes, and tells the time and weather. Recognition and commands run on the phone itself, no cloud.
 
-*В доме тихо, динозавр спит. Зовём «Зюзя», телефон узнаёт человека и показывает его личного персонажа, тот передаёт записку и надевает очки по голосу.*
+<p align="center"><img src="docs/img/demo.gif" alt="Demo: the phone recognizes a person, the dinosaur turns into their own character, a note is played" width="360"></p>
 
-## Что это и зачем
+*The house is quiet, the dinosaur sleeps. We call "Zyuzya" (the default name), the phone recognizes the person and shows their own
+character, which delivers a note and puts on glasses by voice command.*
 
-Старый телефон ставят на подставку. Он слушает своё имя («Зюзя» по умолчанию), смотрит, кто перед ним, и отвечает лицом, голосом и
-запиской. Зачем это нужно:
+> The voice interface is currently in Russian (wake word, commands, notes). The app code, modules and documentation links below are
+> in English where noted; most files under `docs/` are in Russian for now.
 
-- **Вторая жизнь телефона.** Нужен обычный Android-телефон с экраном и камерой; дома он работает как постоянный ассистент. Проверено на Xiaomi Redmi 12 (Android 15).
-- **Приватность.** Имя и лица распознаёт сам телефон; хаб и облачные сервисы нужны только для необязательного: настроек,
-  расшифровки записок, умного дома. Без хаба всё остальное продолжает работать.
-- **Домашний персонаж.** Он узнаёт семью: у каждого человека свой персонаж, он передаёт записки и здоровается раз в день с погодой.
+## What it is and why
 
-## Как это выглядит
+You put an old phone on a stand. It listens for its name ("Zyuzya" by default), looks at who is in front of it, and answers with a
+face, a voice and a note. Why bother:
+
+- **A second life for a phone.** All you need is an ordinary Android phone with a screen and a camera; at home it works as a permanent assistant. Tested on a Xiaomi Redmi 12 (Android 15).
+- **Privacy.** The phone itself recognizes the name and faces. The hub and cloud services are only needed for optional things: shared settings,
+  note transcription, smart home. Without the hub everything else keeps working.
+- **A home character.** It knows the family: each person has their own character, it passes on notes and greets people once a day with the weather.
+
+## What it looks like
 
 <table>
 <tr>
-<td width="260" valign="top"><img src="docs/img/screen.png" alt="Главный экран: часы, дата, погода и динозавр" width="260"></td>
+<td width="260" valign="top"><img src="docs/img/screen.png" alt="Main screen: clock, date, weather and a dinosaur" width="260"></td>
 <td valign="top">
 
-Главный экран: часы и дата, лента прогноза погоды и персонаж, который дышит, моргает, следит взглядом за человеком и говорит
-(рот двигается по звуку). Имя человека появляется под лицом, пока он перед камерой. Когда никого нет, персонаж засыпает, а экран гаснет.
+The main screen: clock and date, a weather forecast strip, and a character that breathes, blinks, follows the person with its eyes and talks
+(the mouth moves with the sound). The person's name appears under the face while they are in front of the camera. When nobody is around, the character falls asleep and the screen goes dark.
 
-Если человек засиделся, персонаж устаёт и просит отдохнуть. Фон мягко подсвечивается цветом выбранного персонажа.
+If a person has been sitting for too long, the character gets tired and asks them to take a break. The background softly glows in the selected character's color.
 
 </td>
 </tr>
 </table>
 
-### Семь персонажей
+### Seven characters
 
-<p align="center"><img src="docs/img/characters.png" alt="Динозаврик, кошечка, собачка, Пуф, хомяк и два пингвина" width="720"></p>
+<p align="center"><img src="docs/img/characters.png" alt="Dinosaur, kitten, puppy, Puf, hamster and two penguins" width="720"></p>
 
-Динозавр показывается по умолчанию, пока человек не узнан. Узнанному человеку показывается его личный персонаж. Пуф, хомяк и
-пингвины одеваются по голосу («надень очки», «сними всё»). Устройство персонажей, наряды и пересборка: [docs/characters.md](docs/characters.md).
+The dinosaur is shown by default until a person is recognized. A recognized person gets their own character. Puf, the hamster and the
+penguins can be dressed by voice ("put on glasses", "take everything off"). How characters, outfits and rebuilds work: [docs/characters.md](docs/characters.md) (in Russian).
 
-## Что умеет
+## What it can do
 
-- **Просыпается по имени:** «Зюзя» — лицо оживает и смотрит на вас.
-- **Узнаёт людей** и здоровается при первой встрече за день: время суток, погода, при желании гороскоп.
-- **Записки по лицу:** «Тебе сообщение от …» — записка звучит, когда нужный человек перед камерой.
-- **Часы и погода** на экране; погоду телефон берёт из хаба или сам (MET Norway) и показывает последнюю без связи.
-- **Короткие голосовые команды без LLM:** время, погода, таймер, простой счёт.
-- **Семейная память** («запомни, батарейки в верхнем ящике», «вспомни», «забудь») и **сообщение на колонку** в комнате
-  (нужен хаб).
-- **Напоминает не засиживаться:** персонаж устаёт и в конце «валится с ног».
+- **Wakes up by name:** say "Zyuzya", the face comes alive and looks at you.
+- **Recognizes people** and greets them at the first meeting of the day: time of day, weather, optionally a horoscope.
+- **Notes delivered by face:** "You have a message from …" is played when the right person is in front of the camera.
+- **Clock and weather** on the screen; the phone takes the weather from the hub or fetches it itself (MET Norway) and keeps showing the last one when offline.
+- **Short voice commands without an LLM:** time, weather, timer, simple arithmetic.
+- **Family memory** ("remember the batteries are in the top drawer", "recall", "forget") and **a message to a speaker** in another room
+  (needs the hub).
+- **Reminds you not to sit too long:** the character gets tired and finally "drops from exhaustion".
 
-Полный список с примерами фраз и деталями: [docs/features.md](docs/features.md).
+The full list with example phrases and details: [docs/features.md](docs/features.md) (in Russian).
 
-## Из чего состоит
+## What it consists of
 
-| Репозиторий | Что делает |
+| Repository | What it does |
 | --- | --- |
-| [androsaur](https://github.com/androsaurs/androsaur) (этот) | главное приложение: лицо, «мозг», собирает поведение из событий модулей |
-| [androsaur-audio](https://github.com/androsaurs/androsaur-audio) | звук: слово пробуждения, запись и воспроизведение речи, записки |
-| [androsaur-camera](https://github.com/androsaurs/androsaur-camera) | камера: лица, люди |
-| [androsaur-hub](https://github.com/androsaurs/androsaur-hub) | домашний сервер: настройки, люди дома, умный дом, память (необязателен) |
-| [androsaur-stand](https://github.com/androsaurs/androsaur-stand) | моторизованная подставка (CAD, электроника) |
+| [androsaur](https://github.com/androsaurs/androsaur) (this one) | main app: the face and the "brain", builds behavior from the modules' events |
+| [androsaur-audio](https://github.com/androsaurs/androsaur-audio) | audio: wake word, recording and playing speech, notes |
+| [androsaur-camera](https://github.com/androsaurs/androsaur-camera) | camera: faces, people |
+| [androsaur-hub](https://github.com/androsaurs/androsaur-hub) | home server: settings, people at home, smart home, memory (optional) |
+| [androsaur-stand](https://github.com/androsaurs/androsaur-stand) | motorized stand (CAD, electronics) |
 
-Приложение само не слушает и не снимает: оно запускает модули звука и камеры на телефоне и говорит с ними по HTTP на localhost.
-Протокол и список запросов — в [docs/features.md](docs/features.md#как-это-связано-с-модулями).
+The app itself neither listens nor films: it starts the audio and camera modules on the phone and talks to them over HTTP on localhost.
+The protocol and the list of requests: [docs/features.md](docs/features.md#как-это-связано-с-модулями) (in Russian).
 
-## Быстрый старт
+## Quick start
 
 ```
 ./gradlew :androidApp:assembleDebug :shared:jvmTest :androidApp:lintDebug
 ```
 
-Нужны JDK 17 и Android SDK (`ANDROID_HOME`). Ставить на телефон после модулей, подписанных тем же ключом. Измерено только на Xiaomi
-Redmi 12, Android 15.
+You need JDK 17 and the Android SDK (`ANDROID_HOME`). Measured only on a Xiaomi Redmi 12, Android 15.
 
-Сначала установите на телефон модули звука и камеры (с тем же ключом подписи), затем это приложение. Хаб необязателен: без него
-приложение работает на последних полученных настройках; адрес хаба передаётся интентом, см. [docs/features.md](docs/features.md).
+First install the audio and camera modules on the phone (signed with the same key), then this app. The hub is optional: without it the
+app works on the last settings it received; the hub address is passed by an intent, see [docs/features.md](docs/features.md).
 
-## Документация
+## Documentation
 
-- [docs/features.md](docs/features.md): все возможности и устройство связи с модулями;
-- [docs/characters.md](docs/characters.md): персонажи, наряды, выражения, пересборка ригов;
-- [docs/demo-recording.md](docs/demo-recording.md): как снимать демо-ролики для анонсов (сценарий → съёмка экрана → сборка);
-- [CHANGELOG.md](CHANGELOG.md): история версий.
+- [docs/features.md](docs/features.md): all features and how it talks to the modules;
+- [docs/characters.md](docs/characters.md): characters, outfits, expressions, rebuilding the rigs;
+- [docs/demo-recording.md](docs/demo-recording.md): how to record demo clips for announcements (script → screen recording → assembly);
+- [CHANGELOG.md](CHANGELOG.md): version history.
 
-## Что не сделано
+Docs are in Russian for now; the README is available in [Russian](README.ru.md) as well.
 
-Автозапуск и возврат модулей после перезагрузки или убитого процесса, подключение к хабу по QR (адрес пока интентом), управление
-подставкой (ESP32), LLM, поведение сложнее «рефлексов». Случайные срабатывания детектора лица иногда откладывают затемнение.
+## What is not done
 
-## Лицензия
+Autostart and recovery of the modules after a reboot or a killed process, connecting to the hub by QR code (for now the address is passed by an intent), stand
+control (ESP32), an LLM, behavior more complex than "reflexes". Random triggers of the face detector sometimes delay the screen dimming.
 
-Copyright © 2026 hram (Евгений) и участники проекта Androsaur.
+## License
 
-Код распространяется под [GNU Affero General Public License v3.0 или более поздней версии](LICENSE) (AGPL-3.0-or-later).
-Его можно использовать, менять и распространять, но любая изменённая версия — в том числе запущенная как сетевой сервис — должна
-быть открыта под этой же лицензией. Коммерческую лицензию без этого условия можно обсудить с автором. Сторонние библиотеки и модели
-остаются под своими лицензиями.
+Copyright © 2026 hram (Evgeny) and Androsaur project contributors.
+
+The code is released under the [GNU Affero General Public License v3.0 or later](LICENSE) (AGPL-3.0-or-later).
+You may use, change and distribute it, but any modified version, including one run as a network service, must be open under the same
+license. A commercial license without this condition can be discussed with the author. Third-party libraries and models remain under
+their own licenses.
