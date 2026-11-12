@@ -44,6 +44,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import dev.hram.androsaur.medication.MedicationSchedule
+import dev.hram.androsaur.notifications.ImportantNotification
+import dev.hram.androsaur.notifications.MedicationNotifications
 import dev.hram.androsaur.weather.Greeting
 import dev.hram.androsaur.weather.WeatherChoice
 import dev.hram.androsaur.weather.WeatherReading
@@ -812,6 +814,24 @@ class Brain(context: Context) {
     }
 
     private var lastMedicationLog = ""
+    private val medicationFlushLock = Any()
+    @Volatile private var medicationConfirmation: Pair<ImportantNotification, Long>? = null
+
+    /** A quiet visual reminder follows its recognised recipient, without another speech request. */
+    fun importantNotification(now: Long): ImportantNotification? {
+        val name = badgeText(now).takeIf { it.isNotEmpty() && it != UNKNOWN } ?: return null
+        val person = badgeId ?: return null
+        val present = tracking && Reflexes.present(now, lastFaceAt)
+        if (!present) return null
+        val date = java.time.LocalDateTime.now()
+        val times = medicationTimes(person)
+        val current = MedicationSchedule.intervalStart(times, date.toLocalDate().toEpochDay(), date.hour * 60 + date.minute)?.let(MedicationSchedule::key)
+        medicationConfirmation?.let { (notice, until) ->
+            if (notice.personId == person && notice.slot == current && now < until) return notice
+        }
+        return MedicationNotifications.pending(person, name, present, times, date.toLocalDate().toEpochDay(),
+            date.hour * 60 + date.minute, slotOf("medication_reminded", person), slotOf("medication_taken", person))
+    }
 
     private fun slotOf(store: String, personId: String): String? =
         runCatching { JSONObject(prefs.getString(store, "{}") ?: "{}") }.getOrDefault(JSONObject()).optString(personId).ifEmpty { null }
@@ -828,7 +848,7 @@ class Brain(context: Context) {
     }
 
     /** Sends the reminders and confirmations the hub has not got yet; they stay queued when it does not answer. */
-    private fun flushMedication() {
+    private fun flushMedication(): Unit = synchronized(medicationFlushLock) {
         val events = runCatching { JSONArray(prefs.getString("medication_events", "[]") ?: "[]") }.getOrDefault(JSONArray())
         if (events.length() == 0) return
         val sent = hub.postMedication(events)
@@ -882,13 +902,20 @@ class Brain(context: Context) {
     /** «Принял»: counts only in the open window (a reminder was given in the interval running now and is not confirmed yet). */
     private fun takeMedication(personId: String) {
         val now = java.time.LocalDateTime.now()
-        val slot = MedicationSchedule.windowOpen(
-            medicationTimes(personId), now.toLocalDate().toEpochDay(), now.hour * 60 + now.minute,
+        val mono = SystemClock.elapsedRealtime()
+        val visiblePerson = badgeId?.takeIf { badgeText(mono).isNotEmpty() && badgeText(mono) != UNKNOWN }
+        val present = tracking && Reflexes.present(mono, lastFaceAt)
+        if (!present || visiblePerson != personId || personId.isEmpty()) { say("Не вижу, кто принял."); return }
+        val slot = MedicationNotifications.confirmableSlot(
+            personId, visiblePerson, present, medicationTimes(personId), now.toLocalDate().toEpochDay(), now.hour * 60 + now.minute,
             slotOf("medication_reminded", personId), slotOf("medication_taken", personId),
         )
         if (slot == null) { say("Сейчас нет напоминания."); return }
+        val notification = importantNotification(mono)
         markMedication("medication_taken", personId, slot, "taken")
+        if (notification != null) medicationConfirmation = notification.confirmed() to (mono + 2500)
         say("Хорошо, отмечено.")
+        flushMedication()
     }
 
     // --- «don't sit for hours» ---
