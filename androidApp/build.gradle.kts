@@ -6,8 +6,8 @@ android {
         applicationId = "dev.hram.androsaur"
         minSdk = 26
         targetSdk = 35
-        versionCode = 26
-        versionName = "0.10.1-catalog-in-app"
+        versionCode = 34
+        versionName = "0.11.6-stand-link-report"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildFeatures { compose = true; buildConfig = true }
@@ -20,6 +20,13 @@ dependencies {
     implementation("androidx.compose.material3:material3:1.3.1")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("app.rive:rive-android:10.0.5")
+    implementation("com.github.espressif:esp-idf-provisioning-android:lib-2.4.3") {
+        // Only BLETransport, Session and Security2 are used. The agent never opens a camera.
+        exclude(group = "com.github.yuriy-budiyev")
+        exclude(group = "com.google.android.gms", module = "play-services-vision")
+        exclude(group = "androidx.camera")
+        exclude(group = "com.google.mlkit")
+    }
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test:rules:1.6.1")

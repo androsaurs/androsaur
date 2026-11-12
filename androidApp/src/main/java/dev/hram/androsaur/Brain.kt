@@ -58,6 +58,8 @@ import org.json.JSONObject
 /** What the screen shows about one module. */
 class ModuleUi(val label: String, val link: String = "…", val running: Boolean = false, val lines: List<String> = emptyList(), val error: String? = null)
 
+data class HubConnectionUi(val url: String = "", val online: Boolean = false, val checked: Boolean = false, val seenAt: Long? = null)
+
 /**
  * The skeleton of the "brain": it keeps the links to the modules, starts them, polls their state and turns what it sees into the
  * gaze and wake flash of the face (reflexes, no LLM). Runs on a background thread; the screen reads [audio], [camera] and the face fields.
@@ -138,6 +140,7 @@ class Brain(context: Context) {
         prefs.edit().putString("character_mode", mode.name).apply()
     }
     val hub = HubClient(context, prefs)
+    val stand = StandConnection(context, hub)
     private val profiler = Profiler { hub.sendTrace(it) }.also { p -> p.onRun = { hub.traceRun = it } }
     val weatherSource = WeatherSource(context, prefs)
     /** The weather to show under the clock, or null when there is none (no place known, nothing fetched, or too old). */
@@ -149,6 +152,7 @@ class Brain(context: Context) {
     var note by mutableStateOf<String?>(null); private set
     /** How the link to the hub is doing, for the panel. */
     var hubState by mutableStateOf(""); private set
+    var hubConnection by mutableStateOf(HubConnectionUi()); private set
     var wakeSettingsState by mutableStateOf(""); private set
     /** After how long without anybody the screen dims; the hub can change it, the last value received is used without the hub. */
     @Volatile var dimAfterMs = applyConfig(hub.stored()); private set
@@ -232,6 +236,7 @@ class Brain(context: Context) {
 
     /** The polling loop; call it from a background coroutine and cancel it when the screen goes away. */
     suspend fun run() = coroutineScope {
+        launch { stand.run() }
         launch { followCharacter() }
         launch { followPersonalChoices() }
         launch { followMouth() }
@@ -310,16 +315,19 @@ class Brain(context: Context) {
     private suspend fun syncHub() {
         var done = emptyList<HubClient.Done>()
         while (true) {
-            if (hub.url.isEmpty()) { hubState = "Хаб не задан"; delay(HUB_EVERY_MS); continue }
+            if (hub.url.isEmpty()) { hubConnection = HubConnectionUi(); hubState = "Хаб не задан"; delay(HUB_EVERY_MS); continue }
             val report = cameraReport()
             val request = characterRequest.incrementAndGet()
-            val result = hub.sync(report, done)
+            val target = hub.url
+            val result = hub.sync(report, done, stand.hubReport())
             val reply = result.getOrNull()
             if (reply == null) {
+                hubConnection = HubConnectionUi(url = target, checked = true)
                 hubState = "Хаб: ${result.exceptionOrNull()?.message} (${hub.url}), работаю на последних настройках"
                 delay(HUB_EVERY_MS); continue
             }
             hubState = "Хаб: на связи (${hub.url})"
+            hubConnection = HubConnectionUi(target, online = true, checked = true, seenAt = SystemClock.elapsedRealtime())
             reply.config?.let { dimAfterMs = applyConfig(it); greetingOn = greetingFrom(it) }
             if (applyAudioSettings()) hub.acknowledgeConfig()
             weatherSource.fromHub(reply.weatherPlace, reply.weather)
@@ -913,8 +921,6 @@ class Brain(context: Context) {
         }
     }
 
-    private fun sittingState(personId: String): SittingState = synchronized(sittingLock) { loadSitting(); sittingStates[personId] ?: SittingState() }
-
     private fun saveSitting() = synchronized(sittingLock) {
         val states = JSONObject()
         sittingStates.forEach { (id, st) -> states.put(id, JSONObject().put("s", st.startMs).put("l", st.lastSeenMs).put("v", st.level).put("p", st.praise)) }
@@ -942,11 +948,12 @@ class Brain(context: Context) {
             val seconds = ((mono - last) / 1000).toInt().coerceIn(1, 5)
             last = mono
             val id = badgeId
-            val settings = if (id != null && badge.isNotEmpty() && badge != UNKNOWN && Reflexes.badgeVisible(mono, recognizedAt, lastFaceAt)) sittingSettings(id) else null
+            val settings = id?.let { sittingSettings(it) }
             // Switched off (or never on) for this person: no session is kept, so switching it on later starts afresh instead of
             // carrying over an old level (and the tired face) from before.
             if (id != null && settings == null && badge.isNotEmpty() && badge != UNKNOWN) synchronized(sittingLock) { loadSitting(); if (sittingStates.remove(id) != null) saveSitting() }
-            if (id == null || settings == null) { sittingLevel = 0; continue }
+            if (id == null || settings == null || badge.isEmpty() || badge == UNKNOWN ||
+                !Reflexes.badgeVisible(mono, recognizedAt, lastFaceAt)) { sittingLevel = 0; continue }
             val now = System.currentTimeMillis()
             val state = synchronized(sittingLock) {
                 loadSitting()
@@ -965,23 +972,28 @@ class Brain(context: Context) {
      */
     private suspend fun remindSitting(personId: String, name: String): Boolean {
         val settings = sittingSettings(personId) ?: return false
+        if (badgeId != personId || badgeText(SystemClock.elapsedRealtime()) != name) return false
         val now = System.currentTimeMillis()
-        val state = sittingState(personId)
+        // Process the return here too: delivery can run before the next one-second watcher tick.
+        val state = synchronized(sittingLock) {
+            loadSitting()
+            SittingRules.seen(settings, sittingStates[personId] ?: SittingState(), now).also { sittingStates[personId] = it }
+        }
         val text: String
         val after: (SittingState) -> SittingState
         if (state.praise) {
             text = SittingTexts.RESTED
-            after = SittingRules::praised
+            after = { SittingRules.praised(it, state.startMs) }
         } else {
             val level = SittingRules.reminderDue(settings, state, now)
             if (level == 0) return false
             text = SittingTexts.reminder(level, name, SittingRules.minutes(state, now))
-            after = { SittingRules.reminded(it, level) }
+            after = { SittingRules.reminded(it, level, state.startMs) }
         }
         val token = greetingInterrupt.get()
         val reply = audioClient.post("/speak", JSONObject().put("text", text))
         if (reply == null || reply.first != 200) return false
-        synchronized(sittingLock) { sittingStates[personId] = after(sittingStates[personId] ?: state) }
+        synchronized(sittingLock) { sittingStates[personId]?.let { sittingStates[personId] = after(it) } }
         saveSitting()
         android.util.Log.i("Sitting", "$personId: ${if (state.praise) "rested" else "reminder"} (session ${SittingRules.minutes(state, now)} min)")
         note = "Не засиживаться: $name"

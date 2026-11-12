@@ -3,7 +3,10 @@ pluginManagement {
 }
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
-    repositories { google(); mavenCentral() }
+    repositories {
+        google(); mavenCentral()
+        maven("https://jitpack.io") { content { includeGroup("com.github.espressif") } }
+    }
 }
 rootProject.name = "androsaur"
 include(":shared", ":androidApp")

@@ -88,6 +88,35 @@ class SittingTest {
         assertTrue(st.praise)
     }
 
+    @Test fun returningAfterHoursCannotTriggerAnOverdueReminderBeforeTheWatcherTick() {
+        val old = sit(SittingState(), 0, 13)
+        val returnedAt = t0 + min(190)
+        assertEquals(0, SittingRules.reminderDue(s, old, returnedAt))
+        val current = SittingRules.seen(s, old, returnedAt)
+        assertEquals(0, SittingRules.minutes(current, returnedAt))
+        assertEquals(0, SittingRules.reminderDue(s, current, returnedAt))
+        assertFalse(current.praise)
+    }
+
+    @Test fun returningAfterARemindedSessionOnlyPraisesAndStartsAfresh() {
+        val old = SittingRules.reminded(sit(SittingState(), 0, 40), 1)
+        val returnedAt = t0 + min(190)
+        val current = SittingRules.seen(s, old, returnedAt)
+        assertEquals(0, SittingRules.reminderDue(s, current, returnedAt))
+        assertTrue(current.praise)
+        val spoken = SittingRules.praised(current, current.startMs)
+        assertFalse(SittingRules.seen(s, spoken, returnedAt + 1000).praise)
+    }
+
+    @Test fun speechResponseCannotMarkANewerSessionAsRemindedOrPraised() {
+        val old = SittingRules.reminded(sit(SittingState(), 0, 40), 1)
+        val current = SittingRules.seen(s, old, t0 + min(190))
+        assertEquals(current, SittingRules.reminded(current, 2, old.startMs))
+        assertEquals(current, SittingRules.praised(current, old.startMs))
+        val nextTick = SittingRules.seen(s, old, t0 + min(41))
+        assertEquals(nextTick.copy(level = 2), SittingRules.reminded(nextTick, 2, old.startMs))
+    }
+
     @Test fun minutesAreWholeMinutes() {
         assertEquals(0, SittingRules.minutes(SittingState(), t0))
         assertEquals(41, SittingRules.minutes(SittingState(startMs = t0), t0 + min(41) + 59_000))

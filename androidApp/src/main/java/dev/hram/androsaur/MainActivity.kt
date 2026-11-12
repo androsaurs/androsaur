@@ -144,6 +144,7 @@ private fun Screen(brain: Brain, dim: (Boolean) -> Unit, openWeather: () -> Unit
     var panel by remember { mutableStateOf(false) }
     var now by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
     val character by brain.character.collectAsStateWithLifecycle()
+    val stand by brain.stand.ui.collectAsStateWithLifecycle()
     var characterError by remember(brain.characterMode, brain.shownCharacter) { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) { while (true) { now = SystemClock.elapsedRealtime(); delay(100) } }
     val dimmed = character.dimmed
@@ -156,7 +157,9 @@ private fun Screen(brain: Brain, dim: (Boolean) -> Unit, openWeather: () -> Unit
     }.clickable { brain.touch(); panel = !panel }) {
         Column(Modifier.fillMaxSize().safeDrawingPadding()) {
             Column(Modifier.weight(if (panel) 0.5f else 1f).fillMaxWidth()) {
-                Clock(now, compact = panel, weather = brain.weather, timerEndsAt = brain.timerEndsAt, ringing = brain.ringing, onWeather = openWeather)
+                Clock(now, compact = panel, weather = brain.weather, timerEndsAt = brain.timerEndsAt, ringing = brain.ringing, onWeather = openWeather,
+                    hub = brain.hubConnection, hubConfigured = brain.hub.paired, hubUrl = brain.hub.url, hubRefused = brain.hub.refused,
+                    stand = stand, onConnection = { brain.touch() })
                 Box(Modifier.weight(1f).fillMaxWidth()) { Face(brain, character, now) { characterError = it } }
             }
             if (panel) Panel(brain, background, Modifier.weight(0.5f), characterError)
@@ -192,18 +195,30 @@ private val DATE = DateTimeFormatter.ofPattern("EEEE, d MMMM", Locale.forLanguag
  * [now] is the screen's tick (it only makes the clock redraw); the time itself is the wall clock.
  */
 @Composable
-private fun Clock(now: Long, compact: Boolean, weather: WeatherReading?, timerEndsAt: Long?, ringing: Boolean, onWeather: () -> Unit) {
+private fun Clock(now: Long, compact: Boolean, weather: WeatherReading?, timerEndsAt: Long?, ringing: Boolean, onWeather: () -> Unit,
+                  hub: HubConnectionUi, hubConfigured: Boolean, hubUrl: String, hubRefused: Boolean, stand: StandUi, onConnection: () -> Unit) {
     val moment = Instant.now().atZone(ZoneId.systemDefault())
     val (dx, dy) = Reflexes.drift(now)
     val driftX by animateFloatAsState(dx.toFloat(), tween(4000), label = "clock dx")
     val driftY by animateFloatAsState(dy.toFloat(), tween(4000), label = "clock dy")
     Column(
         // Narrower than the screen and with air between the lines: the clock, the date, the forecast and the timer each stand apart.
-        Modifier.fillMaxWidth().padding(top = if (compact) 6.dp else 22.dp, start = if (compact) 0.dp else 28.dp, end = if (compact) 0.dp else 28.dp)
+        Modifier.fillMaxWidth().padding(top = if (compact) 6.dp else 22.dp, start = if (compact) 0.dp else 16.dp, end = if (compact) 0.dp else 16.dp)
             .offset { androidx.compose.ui.unit.IntOffset((driftX * 14.dp.toPx()).toInt(), (driftY * 6.dp.toPx()).toInt()) },
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(moment.format(TIME), color = Color.White.copy(alpha = 0.8f), fontSize = if (compact) 30.sp else 56.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Light)
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                ConnectionIndicator("Хаб", stand = false,
+                    state = connectionIndicatorState(hubConfigured, hub.online && !hubRefused && hub.url == hubUrl,
+                        hub.checked && hub.url == hubUrl, hub.seenAt, now), onClick = onConnection)
+            }
+            Text(moment.format(TIME), color = Color.White.copy(alpha = 0.8f), fontSize = if (compact) 30.sp else 56.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Light)
+            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+                ConnectionIndicator("Подставка", stand = true,
+                    state = connectionIndicatorState(stand.paired, stand.online, stand.checked, stand.seenAt, now), onClick = onConnection)
+            }
+        }
         if (!compact) Text(moment.format(DATE), color = Color.White.copy(alpha = 0.55f), fontSize = 20.sp, modifier = Modifier.padding(top = 6.dp))
         if (!compact && weather != null) {
             // The forecast strip when the hours are known; the one-line weather until then (or for weather without hours).
@@ -264,6 +279,7 @@ private fun Panel(brain: Brain, background: (() -> Unit) -> Unit, modifier: Modi
         brain.note?.let { Text(it, color = Color(0xffffb454), fontSize = 14.sp) }
         Text("${brain.hubState.ifEmpty { "Хаб: …" }} · затемнение через ${brain.dimAfterMs / 1000} с", color = Color(0xffc5cfc9), fontSize = 13.sp)
         HubPairing(brain, background)
+        StandPanel(brain.stand, brain.hub.paired)
         if (brain.wakeSettingsState.isNotEmpty()) Text(brain.wakeSettingsState, color = Color(0xffc5cfc9), fontSize = 13.sp)
         if (brain.wakeText.isNotEmpty() && brain.lastWakeAt != null) Text("Последнее срабатывание: ${brain.wakeText}", color = Color(0xff63e6a4), fontSize = 13.sp)
         for (m in listOf(brain.audio, brain.camera)) {

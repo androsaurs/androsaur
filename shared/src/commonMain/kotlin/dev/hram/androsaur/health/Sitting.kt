@@ -28,7 +28,8 @@ object SittingRules {
 
     /** The level of the reminder to give now (1 first, 2 final), or 0 when none is due: the session reached a threshold not reminded yet. */
     fun reminderDue(settings: SittingSettings, state: SittingState, now: Long): Int {
-        if (state.startMs == 0L) return 0
+        // A caller may run before the presence watcher has processed a return from a break.
+        if (state.startMs == 0L || now - state.lastSeenMs >= settings.breakMin * MINUTE) return 0
         val minutes = (now - state.startMs) / MINUTE
         val target = when {
             minutes >= settings.firstMin + settings.repeatMin -> 2
@@ -38,9 +39,12 @@ object SittingRules {
         return if (target > state.level) target else 0
     }
 
-    fun reminded(state: SittingState, level: Int) = state.copy(level = level)
+    /** An HTTP speech response may arrive after the watcher has started a new session. */
+    fun reminded(state: SittingState, level: Int, sessionStartMs: Long = state.startMs) =
+        if (state.startMs == sessionStartMs) state.copy(level = maxOf(state.level, level)) else state
 
-    fun praised(state: SittingState) = state.copy(praise = false)
+    fun praised(state: SittingState, sessionStartMs: Long = state.startMs) =
+        if (state.startMs == sessionStartMs) state.copy(praise = false) else state
 
     /** Whole minutes the session has lasted. */
     fun minutes(state: SittingState, now: Long): Int = if (state.startMs == 0L) 0 else ((now - state.startMs) / MINUTE).toInt()

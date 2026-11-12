@@ -28,6 +28,13 @@ class HubClient(context: Context, private val prefs: SharedPreferences) {
 
     /** This phone's id for the hub: made once, kept in the preferences. */
     private val deviceId: String = prefs.getString(KEY_DEVICE, null) ?: UUID.randomUUID().toString().also { prefs.edit().putString(KEY_DEVICE, it).apply() }
+    val identity: String get() = deviceId
+
+    fun attachStand(binding: JSONObject, ip: String): Boolean = call("POST", "$url/api/device/stand", JSONObject()
+        .put("device", deviceId).put("id", binding.getString("id")).put("fingerprint", binding.getString("fingerprint"))
+        .put("key", binding.getString("hubKey")).put("ip", ip))?.first == 200
+
+    fun detachStand(): Boolean = call("POST", "$url/api/device/stand/detach", JSONObject().put("device", deviceId))?.first == 200
 
     val url: String get() = prefs.getString(KEY_URL, "").orEmpty()
 
@@ -139,11 +146,12 @@ class HubClient(context: Context, private val prefs: SharedPreferences) {
      * ([done]), and takes the settings, the commands and what to do about the people. [Result.failure] when the hub did not
      * answer; then nothing of [done] reached it.
      */
-    fun sync(people: People?, done: List<Done>): Result<Reply> {
+    fun sync(people: People?, done: List<Done>, standLink: JSONObject? = null): Result<Reply> {
         val base = url.ifEmpty { return Result.success(Reply(null, emptyList())) }
         if (token.isEmpty()) return Result.failure(IllegalStateException("нужна привязка: код в админке хаба → «Подключить к хабу» в панели"))
         val applied = prefs.getInt(KEY_APPLIED, 0)
         val report = JSONObject().put("device", deviceId).put("applied", applied)
+            .put("standLink", standLink ?: JSONObject.NULL)
             .put("done", JSONArray().apply { done.forEach { put(JSONObject().put("id", it.id).put("ok", it.error == null).put("error", it.error ?: JSONObject.NULL)) } })
         if (people != null) report.put("people", people.people).put("faceModel", people.faceModel)
         if (!registered && !register(base)) return failure(null)
