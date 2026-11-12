@@ -16,6 +16,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -92,16 +95,28 @@ class MainActivity : ComponentActivity() {
         takeHub(intent)
     }
 
-    /** The hub address handed from outside: `adb shell am start -n dev.hram.androsaur/.MainActivity --es hub http://…` (empty to forget). */
+    /**
+     * The hub handed from outside: `adb shell am start -n dev.hram.androsaur/.MainActivity --es hub http://… --es pair CODE`
+     * pairs this phone with a one-time code from the admin panel; `--es hub ""` forgets the hub.
+     */
     private fun takeHub(intent: Intent?) {
         val url = intent?.getStringExtra("hub") ?: return
-        if (!brain.hub.setUrl(url)) Log.w("Androsaur", "hub address refused: not an http(s) address")
+        val code = intent.getStringExtra("pair")
+        if (code == null) {
+            if (!brain.hub.setUrl(url)) Log.w("Androsaur", "hub address refused: not an http(s) address")
+            return
+        }
+        lifecycleScope.launch(Dispatchers.IO) {
+            val problem = brain.hub.pair(url, code)
+            Log.i("Androsaur", problem?.let { "hub pairing failed: $it" } ?: "paired with the hub")
+        }
     }
 
     /** A tap on the weather: the hub's forecast by the hour in a WebView (it says so when there is no hub). */
     private fun openWeather() {
         brain.touch()
-        startActivity(Intent(this, WeatherActivity::class.java).putExtra(WeatherActivity.EXTRA_HUB, brain.hub.url))
+        startActivity(Intent(this, WeatherActivity::class.java).putExtra(WeatherActivity.EXTRA_HUB, brain.hub.url)
+            .putExtra(WeatherActivity.EXTRA_AUTH, brain.hub.authorization()))
     }
 
     private fun dim(on: Boolean) {
@@ -243,6 +258,7 @@ private fun Panel(brain: Brain, background: (() -> Unit) -> Unit, modifier: Modi
         characterError?.let { Text(it, color = Color(0xffffb454), fontSize = 13.sp) }
         brain.note?.let { Text(it, color = Color(0xffffb454), fontSize = 14.sp) }
         Text("${brain.hubState.ifEmpty { "Хаб: …" }} · затемнение через ${brain.dimAfterMs / 1000} с", color = Color(0xffc5cfc9), fontSize = 13.sp)
+        HubPairing(brain, background)
         if (brain.wakeSettingsState.isNotEmpty()) Text(brain.wakeSettingsState, color = Color(0xffc5cfc9), fontSize = 13.sp)
         if (brain.wakeText.isNotEmpty() && brain.lastWakeAt != null) Text("Последнее срабатывание: ${brain.wakeText}", color = Color(0xff63e6a4), fontSize = 13.sp)
         for (m in listOf(brain.audio, brain.camera)) {
@@ -258,4 +274,38 @@ private fun Panel(brain: Brain, background: (() -> Unit) -> Unit, modifier: Modi
         }
         Text("Нажмите на лицо, чтобы скрыть панель.", color = Color(0xff7d8a83), fontSize = 12.sp)
     }
+}
+
+/**
+ * «Подключить к хабу»: the hub address and a one-time code from the admin panel («Добавить телефон»). Shown open while the
+ * phone is not paired or the hub refused it; folded behind a button otherwise. Every phone of the house pairs with its own code.
+ */
+@Composable
+private fun HubPairing(brain: Brain, background: (() -> Unit) -> Unit) {
+    val needed = !brain.hub.paired || brain.hub.refused
+    var open by remember { mutableStateOf(false) }
+    var address by remember { mutableStateOf(brain.hub.url.ifEmpty { "http://" }) }
+    var code by remember { mutableStateOf("") }
+    var message by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    if (!needed && !open) {
+        TextButton(onClick = { open = true }) { Text("Подключить к другому хабу") }
+        return
+    }
+    Text(if (brain.hub.refused) "Хаб отключил этот телефон: нужен новый код" else "Подключить к хабу", color = Color.White, fontSize = 15.sp)
+    Text("В админке хаба: «Устройства» → «Добавить телефон», затем введите адрес и код.", color = Color(0xffc5cfc9), fontSize = 13.sp)
+    OutlinedTextField(value = address, onValueChange = { address = it }, label = { Text("Адрес хаба") }, singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), modifier = Modifier.fillMaxWidth())
+    OutlinedTextField(value = code, onValueChange = { code = it.uppercase().take(12) }, label = { Text("Код привязки") }, singleLine = true,
+        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters, autoCorrectEnabled = false), modifier = Modifier.fillMaxWidth())
+    Button(enabled = !busy, onClick = {
+        busy = true; message = null
+        background {
+            val problem = brain.hub.pair(address, code)
+            message = problem ?: "Подключено"
+            if (problem == null) { code = ""; open = false }
+            busy = false
+        }
+    }) { Text(if (busy) "Подключаю…" else "Подключить") }
+    message?.let { Text(it, color = if (it == "Подключено") Color(0xff63e6a4) else Color(0xffffb454), fontSize = 13.sp) }
 }

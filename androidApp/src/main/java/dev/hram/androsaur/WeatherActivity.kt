@@ -52,6 +52,8 @@ class WeatherActivity : ComponentActivity() {
             hide(WindowInsetsCompat.Type.systemBars())
         }
         val hub = intent.getStringExtra(EXTRA_HUB).orEmpty()
+        // The phone's hub token (this activity is not exported); the page itself is the only request that needs it.
+        val auth = intent.getStringExtra(EXTRA_AUTH)
         setContent {
             Column(Modifier.fillMaxSize().background(Color.Black).safeDrawingPadding()) {
                 Row(
@@ -73,7 +75,7 @@ class WeatherActivity : ComponentActivity() {
                                 // Links of the page stay in the hub, not in some other app.
                                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest) = !request.url.toString().startsWith(hub)
                             }
-                            if (hub.isEmpty()) loadDataWithBaseURL(null, OFFLINE, "text/html", "utf-8", null) else loadUrl("$hub/weather?embed=1")
+                            if (hub.isEmpty()) loadDataWithBaseURL(null, OFFLINE, "text/html", "utf-8", null) else loadUrl("$hub/weather?embed=1", auth?.let { mapOf("Authorization" to it) }.orEmpty())
                         }
                     },
                 )
@@ -99,6 +101,7 @@ class WeatherActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_HUB = "hub"
+        const val EXTRA_AUTH = "auth"
         private const val IDLE_MS = 60_000L
         private const val OFFLINE = """<html><body style="font-family:sans-serif;background:#000;color:#c3c2b7;padding:32px 20px;font-size:18px">
             <p><b style="color:#f0efec">Хаб недоступен.</b></p><p>Подробный прогноз по часам — в хабе. На главном экране погода есть и без него.</p>

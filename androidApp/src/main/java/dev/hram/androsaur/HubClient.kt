@@ -17,9 +17,10 @@ import java.util.UUID
 /**
  * The link to androsaur-hub, the home server with the admin panel. This app is the only one on the phone that talks to it: it
  * sends what settings it has and takes the values set in the hub. The last values received are kept, so without the hub the phone
- * works on them (or on the defaults). It talks to the hub over the home Wi-Fi; the address is set from outside for now
- * (`adb shell am start … --es hub http://<hub>:8770`);
- * pairing by QR code comes later.
+ * works on them (or on the defaults). It talks to the hub over the home Wi-Fi. The hub answers only paired phones: a one-time
+ * code from the admin panel (typed in the panel, or `adb shell am start … --es hub http://<hub>:8770 --es pair CODE`) is
+ * exchanged for this phone's own token, sent with every request. The token is a credential: kept in the app's private
+ * preferences, never logged or shown.
  */
 class HubClient(context: Context, private val prefs: SharedPreferences) {
     private val name = Settings.Global.getString(context.contentResolver, Settings.Global.DEVICE_NAME)?.takeIf { it.isNotBlank() } ?: Build.MODEL
@@ -30,13 +31,53 @@ class HubClient(context: Context, private val prefs: SharedPreferences) {
 
     val url: String get() = prefs.getString(KEY_URL, "").orEmpty()
 
-    /** Sets the hub address (empty to forget it). Returns false for something that is not an http(s) address. */
+    private val token: String get() = prefs.getString(KEY_TOKEN, "").orEmpty()
+
+    /** True when this phone holds a token of the hub at [url]. */
+    val paired: Boolean get() = url.isNotEmpty() && token.isNotEmpty()
+
+    /** The hub refused this phone's token (revoked in the admin panel, or the hub was set up anew): pair again. */
+    @Volatile var refused = false
+        private set
+
+    /** The header for the hub's own pages opened in a WebView (the weather); null when not paired. */
+    fun authorization(): String? = token.takeIf { it.isNotEmpty() }?.let { "Bearer $it" }
+
+    /** Sets the hub address (empty to forget it). Returns false for something that is not an http(s) address. Another hub drops the token. */
     fun setUrl(value: String): Boolean {
         val clean = value.trim().trimEnd('/')
-        if (clean.isNotEmpty() && !Regex("^https?://[^/\\s]+$").matches(clean)) return false
-        prefs.edit().putString(KEY_URL, clean).apply()
+        if (clean.isNotEmpty() && !ADDRESS.matches(clean)) return false
+        val edit = prefs.edit().putString(KEY_URL, clean)
+        if (clean != url) edit.remove(KEY_TOKEN)
+        edit.apply()
         registered = false
         return true
+    }
+
+    /**
+     * Exchanges a one-time code from the admin panel for this phone's token and remembers the hub. Returns null when paired,
+     * else what to tell the person.
+     */
+    fun pair(address: String, code: String): String? {
+        val clean = address.trim().trimEnd('/')
+        if (!ADDRESS.matches(clean)) return "Адрес хаба вида http://192.168.1.10:8770"
+        if (code.count { it.isLetterOrDigit() } < 8) return "Код из админки: восемь знаков, например ABCD-2345"
+        val body = JSONObject().put("code", code.trim()).put("id", deviceId).put("name", name)
+        val reply = call("POST", "$clean/api/device/pair", body, anonymous = true)
+        return when (reply?.first) {
+            200 -> {
+                val newToken = reply.second.optString("token").takeIf { it.length >= 20 }
+                if (newToken == null) "Хаб ответил непонятно" else {
+                    prefs.edit().putString(KEY_URL, clean).putString(KEY_TOKEN, newToken).apply()
+                    registered = false; refused = false
+                    null
+                }
+            }
+            403 -> "Код не подошёл или устарел: выпустите новый в админке"
+            429 -> "Слишком много попыток, подождите пять минут"
+            null -> "Хаб не отвечает по адресу $clean"
+            else -> "Хаб ответил ${reply.first}"
+        }
     }
 
     /** The values the hub set last time, as module → key → value; empty before the first contact. */
@@ -100,6 +141,7 @@ class HubClient(context: Context, private val prefs: SharedPreferences) {
      */
     fun sync(people: People?, done: List<Done>): Result<Reply> {
         val base = url.ifEmpty { return Result.success(Reply(null, emptyList())) }
+        if (token.isEmpty()) return Result.failure(IllegalStateException("нужна привязка: код в админке хаба → «Подключить к хабу» в панели"))
         val applied = prefs.getInt(KEY_APPLIED, 0)
         val report = JSONObject().put("device", deviceId).put("applied", applied)
             .put("done", JSONArray().apply { done.forEach { put(JSONObject().put("id", it.id).put("ok", it.error == null).put("error", it.error ?: JSONObject.NULL)) } })
@@ -151,15 +193,17 @@ class HubClient(context: Context, private val prefs: SharedPreferences) {
     /** Hands the hub the sound of a voice note (WAV) for transcription. True when the hub has it (now or before). */
     fun uploadNote(id: String, to: String, from: String, createdMs: Long, durationMs: Long, wav: ByteArray): Boolean {
         val base = url.ifEmpty { return false }
+        if (token.isEmpty()) return false
         val q = "device=$deviceId&to=${java.net.URLEncoder.encode(to, "UTF-8")}&from=${java.net.URLEncoder.encode(from, "UTF-8")}&createdMs=$createdMs&durationMs=$durationMs"
         var connection: HttpURLConnection? = null
         return try {
             connection = (URL("$base/api/device/notes/$id?$q").openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"; connectTimeout = 3000; readTimeout = 20_000; doOutput = true
                 setRequestProperty("Content-Type", "audio/wav")
+                authorization()?.let { setRequestProperty("Authorization", it) }
                 outputStream.use { it.write(wav) }
             }
-            connection.responseCode in 200..201
+            noteRefusal(connection.responseCode) in 200..201
         } catch (_: Exception) { false }
         finally { connection?.disconnect() }
     }
@@ -205,6 +249,7 @@ class HubClient(context: Context, private val prefs: SharedPreferences) {
     /** A recorded voice for the hub to make sense of: the hub's JSON answer, `{"status": "error"}` for an HTTP error, null when it did not answer. */
     private fun postVoice(path: String, from: String, fromId: String, wav: ByteArray): JSONObject? {
         val base = url.ifEmpty { return null }
+        if (token.isEmpty()) return null
         val q = "from=${java.net.URLEncoder.encode(from, "UTF-8")}&fromId=${java.net.URLEncoder.encode(fromId, "UTF-8")}"
         var connection: HttpURLConnection? = null
         return try {
@@ -212,9 +257,10 @@ class HubClient(context: Context, private val prefs: SharedPreferences) {
                 requestMethod = "POST"; connectTimeout = 3000; readTimeout = 30_000; doOutput = true
                 setRequestProperty("Content-Type", "audio/wav")
                 traceRun.takeIf { it.isNotEmpty() }?.let { setRequestProperty("X-Trace-Run", it) }
+                authorization()?.let { setRequestProperty("Authorization", it) }
                 outputStream.use { it.write(wav) }
             }
-            if (connection.responseCode != 200) return JSONObject().put("status", "error")
+            if (noteRefusal(connection.responseCode) != 200) return JSONObject().put("status", "error")
             JSONObject(connection.inputStream.use { it.readBytes().toString(Charsets.UTF_8) })
         } catch (_: Exception) { null }
         finally { connection?.disconnect() }
@@ -298,7 +344,17 @@ class HubClient(context: Context, private val prefs: SharedPreferences) {
         return (if (base.isEmpty()) "hub_missing" else "unavailable") to null
     }
 
-    private fun failure(reply: Pair<Int, JSONObject>?): Result<Reply> = Result.failure(IllegalStateException(reply?.let { "ответ ${it.first}" } ?: "нет связи"))
+    private fun failure(reply: Pair<Int, JSONObject>?): Result<Reply> = Result.failure(IllegalStateException(when {
+        reply == null -> if (token.isEmpty()) "нужна привязка: код в админке хаба → «Подключить к хабу» в панели" else "нет связи"
+        reply.first == 401 -> "телефон отключён в хабе: нужен новый код привязки"
+        else -> "ответ ${reply.first}"
+    }))
+
+    /** Remembers that the hub refused the token (401) so the panel can ask for pairing; returns the code as is. */
+    private fun noteRefusal(code: Int): Int {
+        if (code == 401) { refused = true; registered = false } else if (code in 200..299) refused = false
+        return code
+    }
 
     private fun registration(): JSONObject {
         val settings = JSONArray()
@@ -310,20 +366,27 @@ class HubClient(context: Context, private val prefs: SharedPreferences) {
             .put("appVersion", BuildConfig.VERSION_NAME).put("settings", settings)
     }
 
-    private fun call(method: String, address: String, body: JSONObject?, readTimeoutMs: Int = 5000, connectTimeoutMs: Int = 3000): Pair<Int, JSONObject>? {
+    private fun call(method: String, address: String, body: JSONObject?, readTimeoutMs: Int = 5000, connectTimeoutMs: Int = 3000, anonymous: Boolean = false): Pair<Int, JSONObject>? {
+        // Unpaired, the hub would only refuse: do not knock.
+        val auth = if (anonymous) null else authorization() ?: return null
         var connection: HttpURLConnection? = null
         return try {
             connection = (URL(address).openConnection() as HttpURLConnection).apply {
                 requestMethod = method; connectTimeout = connectTimeoutMs; readTimeout = readTimeoutMs
+                if (auth != null) setRequestProperty("Authorization", auth)
                 if (method == "GET") { useCaches = false; setRequestProperty("Cache-Control", "no-cache") }
                 if (body != null) { doOutput = true; setRequestProperty("Content-Type", "application/json"); outputStream.use { it.write(body.toString().toByteArray()) } }
             }
-            val code = connection.responseCode
+            val code = if (anonymous) connection.responseCode else noteRefusal(connection.responseCode)
             val text = (if (code in 200..299) connection.inputStream else connection.errorStream)?.use { it.readBytes().toString(Charsets.UTF_8) } ?: ""
             code to (runCatching { JSONObject(text) }.getOrDefault(JSONObject()))
         } catch (_: Exception) { null }
         finally { connection?.disconnect() }
     }
 
-    private companion object { const val KEY_URL = "hub_url"; const val KEY_DEVICE = "hub_device_id"; const val KEY_CONFIG = "hub_config"; const val KEY_PEOPLE_REV = "hub_people_rev"; const val KEY_APPLIED = "hub_applied_rev" }
+    private companion object {
+        const val KEY_URL = "hub_url"; const val KEY_DEVICE = "hub_device_id"; const val KEY_CONFIG = "hub_config"; const val KEY_PEOPLE_REV = "hub_people_rev"; const val KEY_APPLIED = "hub_applied_rev"
+        const val KEY_TOKEN = "hub_token"
+        val ADDRESS = Regex("^https?://[^/\\s]+$")
+    }
 }

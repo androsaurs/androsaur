@@ -81,7 +81,7 @@ The protocol and the list of requests: [docs/features.md](docs/features.md#ка�
 You need JDK 17 and the Android SDK (`ANDROID_HOME`). Measured only on a Xiaomi Redmi 12, Android 15.
 
 First install the audio and camera modules on the phone (signed with the same key), then this app. The hub is optional: without it the
-app works on the last settings it received; the hub address is passed by an intent, see [docs/features.md](docs/features.md).
+app works on the last settings it received; the phone is paired with the hub by a one-time code from the admin panel (panel → "Подключить к хабу"), see [docs/features.md](docs/features.md).
 
 ## Documentation
 
@@ -94,7 +94,7 @@ Docs are in Russian for now; the README is available in [Russian](README.ru.md) 
 
 ## What is not done
 
-Autostart and recovery of the modules after a reboot or a killed process, connecting to the hub by QR code (for now the address is passed by an intent), stand
+Autostart and recovery of the modules after a reboot or a killed process, connecting to the hub by scanning a QR code (for now the code is typed in), stand
 control (ESP32), an LLM, behavior more complex than "reflexes". Random triggers of the face detector sometimes delay the screen dimming.
 
 ## License
