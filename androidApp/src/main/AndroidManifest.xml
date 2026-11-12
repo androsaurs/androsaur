@@ -20,6 +20,6 @@
             <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.HOME" /><category android:name="android.intent.category.DEFAULT" /></intent-filter>
         </activity>
         <!-- The hub's weather page by the hour, opened by a tap on the weather over the face. -->
-        <activity android:name=".WeatherActivity" android:exported="false" android:configChanges="orientation|screenSize|keyboardHidden" />
+        <activity android:name=".HubPageActivity" android:exported="false" android:configChanges="orientation|screenSize|keyboardHidden" />
     </application>
 </manifest>

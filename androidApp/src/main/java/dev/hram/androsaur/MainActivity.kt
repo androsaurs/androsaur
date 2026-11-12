@@ -22,7 +22,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
 import dev.hram.androsaur.character.CharacterId
 import androidx.compose.ui.graphics.lerp
@@ -115,8 +115,7 @@ class MainActivity : ComponentActivity() {
     /** A tap on the weather: the hub's forecast by the hour in a WebView (it says so when there is no hub). */
     private fun openWeather() {
         brain.touch()
-        startActivity(Intent(this, WeatherActivity::class.java).putExtra(WeatherActivity.EXTRA_HUB, brain.hub.url)
-            .putExtra(WeatherActivity.EXTRA_AUTH, brain.hub.authorization()))
+        openHubPage(this, brain, "/weather?embed=1", "Подробный прогноз по часам — в хабе. На главном экране погода есть и без него.")
     }
 
     private fun dim(on: Boolean) {
@@ -238,7 +237,7 @@ private fun Caption(title: String, hint: String?, modifier: Modifier, color: Col
 
 @Composable
 private fun Panel(brain: Brain, background: (() -> Unit) -> Unit, modifier: Modifier, characterError: String?) {
-    val uri = LocalUriHandler.current
+    val context = LocalContext.current
     Column(modifier.fillMaxWidth().background(Color(0xff111815)).verticalScroll(rememberScrollState()).padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text("Androsaur · каркас", color = Color.White, fontSize = 18.sp)
         Text("Персонаж", color = Color.White, fontSize = 15.sp)
@@ -251,10 +250,16 @@ private fun Panel(brain: Brain, background: (() -> Unit) -> Unit, modifier: Modi
             }
         }
         Text(if (brain.characterMode == CharacterMode.SIMPLE) "Глаза и рот" else brain.characterId.title, color = Color(0xffc5cfc9), fontSize = 13.sp)
-        TextButton(onClick = { uri.openUri(brain.hub.url.trimEnd('/') + "/characters") }, enabled = brain.hub.url.isNotEmpty()) {
+        TextButton(
+            onClick = {
+                brain.touch()
+                openHubPage(context, brain, "/characters?embed=1", "Выбрать персонажа можно, когда хаб на связи.")
+            },
+            enabled = brain.hub.paired,
+        ) {
             Text("Каталог · выбрать для себя")
         }
-        if (brain.hub.url.isEmpty()) Text("Для выбора персонажа подключи хаб", color = Color(0xffc5cfc9), fontSize = 13.sp)
+        if (!brain.hub.paired) Text("Для выбора персонажа подключи хаб", color = Color(0xffc5cfc9), fontSize = 13.sp)
         characterError?.let { Text(it, color = Color(0xffffb454), fontSize = 13.sp) }
         brain.note?.let { Text(it, color = Color(0xffffb454), fontSize = 14.sp) }
         Text("${brain.hubState.ifEmpty { "Хаб: …" }} · затемнение через ${brain.dimAfterMs / 1000} с", color = Color(0xffc5cfc9), fontSize = 13.sp)
@@ -308,4 +313,13 @@ private fun HubPairing(brain: Brain, background: (() -> Unit) -> Unit) {
         }
     }) { Text(if (busy) "Подключаю…" else "Подключить") }
     message?.let { Text(it, color = if (it == "Подключено") Color(0xff63e6a4) else Color(0xffffb454), fontSize = 13.sp) }
+}
+
+/** A page of the hub inside the app (see [HubPageActivity]): opened with this phone's hub token, no login for the person holding it. */
+private fun openHubPage(context: android.content.Context, brain: Brain, path: String, offline: String) {
+    context.startActivity(
+        Intent(context, HubPageActivity::class.java).putExtra(HubPageActivity.EXTRA_HUB, brain.hub.url)
+            .putExtra(HubPageActivity.EXTRA_PATH, path).putExtra(HubPageActivity.EXTRA_OFFLINE, offline)
+            .putExtra(HubPageActivity.EXTRA_AUTH, brain.hub.authorization()),
+    )
 }

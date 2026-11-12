@@ -33,12 +33,14 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 
 /**
- * The detailed forecast: the hub's weather charts (`/weather?embed=1`) in a WebView, opened by a tap on the weather over the face.
- * Nothing of its own here — the page is the hub's. A «Назад» bar on top, since a kiosk has no navigation buttons; the system bars are
- * hidden as on the face screen, and nothing goes under the camera cutout. Without the hub it says so. Left alone, it closes after a
- * minute, so the stand comes back to the face.
+ * A page of the hub shown inside the app, in a WebView: the detailed forecast (`/weather?embed=1`, opened by a tap on the weather over
+ * the face) and the character catalog (`/characters?embed=1`, from the panel). Nothing of its own here — the page is the hub's, and the
+ * phone opens it with its own hub token (the first request carries it; the hub then keeps the catalog open by a short cookie, so the
+ * page's forms work). A child chooses a character without ever seeing the owner's login. A «Назад» bar on top, since a kiosk has no
+ * navigation buttons; the system bars are hidden as on the face screen, and nothing goes under the camera cutout. Without the hub it
+ * says so. Left alone, it closes after a minute, so the stand comes back to the face.
  */
-class WeatherActivity : ComponentActivity() {
+class HubPageActivity : ComponentActivity() {
     private val idle = Handler(Looper.getMainLooper())
     private val close = Runnable { finish() }
 
@@ -52,7 +54,9 @@ class WeatherActivity : ComponentActivity() {
             hide(WindowInsetsCompat.Type.systemBars())
         }
         val hub = intent.getStringExtra(EXTRA_HUB).orEmpty()
-        // The phone's hub token (this activity is not exported); the page itself is the only request that needs it.
+        val path = intent.getStringExtra(EXTRA_PATH) ?: "/weather?embed=1"
+        val offline = offlinePage(intent.getStringExtra(EXTRA_OFFLINE).orEmpty())
+        // The phone's hub token (this activity is not exported); only the first request of the page needs it.
         val auth = intent.getStringExtra(EXTRA_AUTH)
         setContent {
             Column(Modifier.fillMaxSize().background(Color.Black).safeDrawingPadding()) {
@@ -70,12 +74,12 @@ class WeatherActivity : ComponentActivity() {
                             settings.javaScriptEnabled = true // the charts are drawn by the page's script
                             webViewClient = object : WebViewClient() {
                                 override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
-                                    if (request.isForMainFrame) view.loadDataWithBaseURL(null, OFFLINE, "text/html", "utf-8", null)
+                                    if (request.isForMainFrame) view.loadDataWithBaseURL(null, offline, "text/html", "utf-8", null)
                                 }
                                 // Links of the page stay in the hub, not in some other app.
                                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest) = !request.url.toString().startsWith(hub)
                             }
-                            if (hub.isEmpty()) loadDataWithBaseURL(null, OFFLINE, "text/html", "utf-8", null) else loadUrl("$hub/weather?embed=1", auth?.let { mapOf("Authorization" to it) }.orEmpty())
+                            if (hub.isEmpty()) loadDataWithBaseURL(null, offline, "text/html", "utf-8", null) else loadUrl("$hub$path", auth?.let { mapOf("Authorization" to it) }.orEmpty())
                         }
                     },
                 )
@@ -102,9 +106,11 @@ class WeatherActivity : ComponentActivity() {
     companion object {
         const val EXTRA_HUB = "hub"
         const val EXTRA_AUTH = "auth"
+        const val EXTRA_PATH = "path"
+        const val EXTRA_OFFLINE = "offline"
         private const val IDLE_MS = 60_000L
-        private const val OFFLINE = """<html><body style="font-family:sans-serif;background:#000;color:#c3c2b7;padding:32px 20px;font-size:18px">
-            <p><b style="color:#f0efec">Хаб недоступен.</b></p><p>Подробный прогноз по часам — в хабе. На главном экране погода есть и без него.</p>
+        private fun offlinePage(text: String) = """<html><body style="font-family:sans-serif;background:#000;color:#c3c2b7;padding:32px 20px;font-size:18px">
+            <p><b style="color:#f0efec">Хаб недоступен.</b></p><p>${text.ifEmpty { "Эта страница живёт в хабе." }}</p>
             </body></html>"""
     }
 }

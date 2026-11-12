@@ -6,8 +6,8 @@ android {
         applicationId = "dev.hram.androsaur"
         minSdk = 26
         targetSdk = 35
-        versionCode = 25
-        versionName = "0.10-hub-pairing"
+        versionCode = 26
+        versionName = "0.10.1-catalog-in-app"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildFeatures { compose = true; buildConfig = true }
