@@ -24,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.zIndex
 import dev.hram.androsaur.character.CharacterId
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.animation.animateColorAsState
@@ -175,17 +176,20 @@ private fun Face(brain: Brain, state: CharacterState, now: Long, onCharacterErro
     if (badge.isNotEmpty()) shown = badge
     val alpha by animateFloatAsState(if (badge.isNotEmpty()) 1f else 0f, tween(500), label = "badge")
     val notification = brain.importantNotification(now)
-    Column(Modifier.fillMaxSize()) {
-        notification?.let { ImportantNotificationBubble(it, compact = state.interaction != Interaction.IDLE) }
-        Box(Modifier.weight(1f).fillMaxWidth()) {
-            CharacterView(state, brain.characterMode, now, onCharacterError, brain.shownCharacter)
-            // What to do now, in words: the person should never wonder whether to talk.
-            when (state.interaction) {
-                Interaction.COMMAND -> Caption("Слушаю", "скажите: «передай жене …»", Modifier.align(Alignment.BottomCenter))
-                Interaction.RECORDING -> Caption("● Говорите, идёт запись", "после паузы запись закончится сама", Modifier.align(Alignment.BottomCenter), Color(0xffff6b5e))
-                Interaction.NOTE -> Caption("Играет записка", null, Modifier.align(Alignment.BottomCenter))
-                else -> if (alpha > 0.01f) Text(shown, color = Color.White.copy(alpha = alpha), fontSize = 34.sp, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp))
-            }
+    Box(Modifier.fillMaxSize()) {
+        // The reminder is an overlay: it must not reduce the character stage and push the
+        // dinosaur/name downward. The empty area above the head gives it a natural place.
+        CharacterView(state, brain.characterMode, now, onCharacterError, brain.shownCharacter)
+        notification?.let {
+            ImportantNotificationBubble(it, compact = state.interaction != Interaction.IDLE,
+                modifier = Modifier.align(Alignment.TopCenter).zIndex(1f))
+        }
+        // What to do now, in words: the person should never wonder whether to talk.
+        when (state.interaction) {
+            Interaction.COMMAND -> Caption("Слушаю", "скажите: «передай жене …»", Modifier.align(Alignment.BottomCenter))
+            Interaction.RECORDING -> Caption("● Говорите, идёт запись", "после паузы запись закончится сама", Modifier.align(Alignment.BottomCenter), Color(0xffff6b5e))
+            Interaction.NOTE -> Caption("Играет записка", null, Modifier.align(Alignment.BottomCenter))
+            else -> if (alpha > 0.01f) Text(shown, color = Color.White.copy(alpha = alpha), fontSize = 34.sp, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp))
         }
     }
 }

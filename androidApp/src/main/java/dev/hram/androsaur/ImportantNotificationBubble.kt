@@ -28,11 +28,11 @@ import dev.hram.androsaur.notifications.ImportantNotification
 import dev.hram.androsaur.notifications.NotificationStatus
 
 @Composable
-internal fun ImportantNotificationBubble(notification: ImportantNotification, compact: Boolean) {
+internal fun ImportantNotificationBubble(notification: ImportantNotification, compact: Boolean, modifier: Modifier = Modifier) {
     val confirmed = notification.status == NotificationStatus.CONFIRMED
     val background = if (confirmed) Color(0xff12392c) else Color(0xff202e26)
     val accent = if (confirmed) Color(0xff63e6a4) else Color(0xffffd18a)
-    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)
+    Column(modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)
         .testTag("important-notification").semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
         horizontalAlignment = Alignment.CenterHorizontally) {
         Surface(color = background, shape = RoundedCornerShape(20.dp), border = BorderStroke(1.dp, accent.copy(alpha = .3f)),
