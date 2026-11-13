@@ -8,6 +8,11 @@ import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.BatteryManager
+import dev.hram.androsaur.stand.BatteryObservation
+import kotlinx.coroutines.selects.select
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.os.ParcelUuid
@@ -16,6 +21,8 @@ import com.espressif.provisioning.listeners.ResponseListener
 import com.espressif.provisioning.security.Security2
 import com.espressif.provisioning.transport.BLETransport
 import dev.hram.androsaur.stand.StandProtocol
+import dev.hram.androsaur.stand.TrackingObservation
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -27,7 +34,7 @@ import kotlin.coroutines.resumeWithException
 data class StandUi(val message: String = "Подставка не подключена", val busy: Boolean = false,
     val devices: List<Pair<String, String>> = emptyList(), val paired: Boolean = false, val online: Boolean = false,
     val labelName: String = "", val recoveryAvailable: Boolean = false, val networks: List<String> = emptyList(),
-    val checked: Boolean = false, val seenAt: Long? = null)
+    val checked: Boolean = false, val seenAt: Long? = null, val trackingAvailable: Boolean = false, val batteryAvailable: Boolean = false)
 
 /** This object belongs to one Brain lifecycle; cancelling run stops discovery and closes BLE. */
 @SuppressLint("MissingPermission")
@@ -42,7 +49,95 @@ class StandConnection(private val context: Context, private val hub: HubClient) 
     private var scan: ScanCallback? = null
     private val handler = android.os.Handler(android.os.Looper.getMainLooper())
     private val stopScanning = Runnable { stopScan() }
-    private var ip: String? = null
+    @Volatile private var ip: String? = null
+    @Volatile private var observationAck: Pair<String, Long>? = null
+    @Volatile private var lastStatus: JSONObject? = null
+    private var lastStatusAt = 0L
+    private val trackingLivenessMs = 10_000L
+    private var announced: Pair<String, String>? = null
+    private data class Outgoing(val session: String, val face: TrackingObservation? = null, val battery: BatteryObservation? = null)
+    @Volatile private var latestBattery: BatteryObservation? = null
+    fun batteryReport(): JSONObject? = latestBattery?.let { sample ->
+        val age = sample.age(android.os.SystemClock.elapsedRealtime())
+        if (age > 60_000) null else JSONObject().put("percent", sample.percent)
+            .put("charging", sample.charging).put("ageMs", age)
+    }
+    private val batteries = Channel<BatteryObservation>(Channel.CONFLATED)
+    private val batterySession = UUID.randomUUID().toString()
+    private val observations = Channel<Pair<String, TrackingObservation>>(Channel.CONFLATED)
+    fun observe(session: String, sample: TrackingObservation) { observations.trySend(session to sample) }
+
+    private suspend fun sampleBattery() {
+        var seq = 0L
+        var previous: BatteryObservation? = null
+        while (currentCoroutineContext().isActive) {
+            val now = android.os.SystemClock.elapsedRealtime()
+            val intent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+            val status = intent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
+            val charging = when (status) {
+                BatteryManager.BATTERY_STATUS_CHARGING -> true
+                BatteryManager.BATTERY_STATUS_DISCHARGING, BatteryManager.BATTERY_STATUS_NOT_CHARGING,
+                BatteryManager.BATTERY_STATUS_FULL -> false
+                else -> null
+            }
+            val sample = BatteryObservation.from(seq + 1, now,
+                intent?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1,
+                intent?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1, charging)
+            if (sample != null && (previous == null || sample.percent != previous.percent ||
+                    sample.charging != previous.charging || now - previous.sampledAtMs >= 15_000)) {
+                seq++; previous = sample; latestBattery = sample; batteries.trySend(sample)
+            }
+            delay(1000)
+        }
+    }
+
+    private suspend fun sendObservations() {
+        var transport: StandObservationClient? = null
+        var retryAt = 0L
+        try {
+            while (currentCoroutineContext().isActive) {
+                val outgoing = select<Outgoing> {
+                    batteries.onReceive { Outgoing(batterySession, battery = it) }
+                    observations.onReceive { Outgoing(it.first, face = it.second) }
+                }
+                val session = outgoing.session
+                val sample = outgoing.face
+                val battery = outgoing.battery
+                val now = android.os.SystemClock.elapsedRealtime()
+                val current = state.value
+                val address = ip ?: continue
+                if (!current.paired || now < retryAt) continue
+                if (sample != null && (!current.trackingAvailable || sample.age(now) > 500)) continue
+                if (battery != null && (!current.batteryAvailable || battery.age(now) > 60_000)) continue
+                try {
+                    val binding = store.read() ?: continue
+                    if (transport?.belongsTo(binding) != true) { transport?.close(); transport = StandObservationClient(binding) }
+                    if (!transport.isWarm(address)) {
+                        transport.prepare(address)
+                        if (sample != null) continue
+                    }
+                    if (sample != null) transport.send(address, session, sample)
+                    else transport.sendBattery(address, session, checkNotNull(battery))
+                    val at = android.os.SystemClock.elapsedRealtime()
+                    observationAck = address to at
+                    ip = address
+                    state.value = state.value.copy(online = true, checked = true, seenAt = at,
+                        message = "Подставка на связи · $address · ${lastStatus?.optString("firmware").orEmpty()}")
+                } catch (_: StaleObservationException) {
+                    // Keep the established TLS pool; the next fresh camera result replaces this one.
+                    currentCoroutineContext().ensureActive()
+                } catch (e: Exception) {
+                    currentCoroutineContext().ensureActive()
+                    transport?.close(); transport = null
+                    val at = android.os.SystemClock.elapsedRealtime()
+                    retryAt = at + 500
+                    if (observationAck?.second?.let { at - it in 0L..trackingLivenessMs } != true)
+                        state.value = state.value.copy(online = false, message = "Связь с подставкой прервалась · повторю подключение")
+                    android.util.Log.w("StandConnection", "Observation send failed: ${e.javaClass.simpleName}")
+                }
+            }
+        } finally { transport?.close() }
+    }
     private val mutex = kotlinx.coroutines.sync.Mutex()
     private var label: dev.hram.androsaur.stand.StandSetupLabel? = null
     fun bluetoothEnabled(): Boolean = runCatching { bluetooth?.isEnabled == true }.getOrDefault(false)
@@ -303,30 +398,47 @@ class StandConnection(private val context: Context, private val hub: HubClient) 
         } finally { mutex.unlock() }
     }
 
-    suspend fun run() {
+    suspend fun run() = coroutineScope {
+        launch { sampleBattery() }
+        launch { sendObservations() }
         try {
             while (currentCoroutineContext().isActive) {
                 if (mutex.tryLock()) try {
                     val binding = store.read()
                     if (binding?.has("id") == true) {
-                        val (address, status) = readStatus(binding)
+                        val at = android.os.SystemClock.elapsedRealtime()
+                        val ack = observationAck
+                        val cached = lastStatus
+                        val knownAddress = ip
+                        val useAck = ack != null && ack.first == knownAddress && at - ack.second in 0L..trackingLivenessMs &&
+                            cached != null && at - lastStatusAt < 60_000
+                        val (address, status) = if (useAck) checkNotNull(knownAddress) to checkNotNull(cached) else readStatus(binding)
+                        if (!useAck) { lastStatus = status; lastStatusAt = at }
                         if (binding.optString("lastIp") != address) store.write(binding.put("lastIp", address))
                         if (!state.value.online) android.util.Log.i("StandConnection", "Stand connected: authenticated HTTPS status")
                         ip = address
-                        state.value = state.value.copy(paired = true, online = true, checked = true, seenAt = android.os.SystemClock.elapsedRealtime(), message = "Подставка на связи · $address · ${status.optString("firmware")}")
-                        if (binding.optString("hub") == hub.url && hub.paired) hub.attachStand(binding, address)
+                        val caps = status.optJSONArray("capabilities")
+                        val hasTracking = caps != null && (0 until caps.length()).any { caps.optString(it) == "tracking" }
+                        state.value = state.value.copy(paired = true, online = true, checked = true, seenAt = android.os.SystemClock.elapsedRealtime(), trackingAvailable = hasTracking, batteryAvailable = caps != null && (0 until caps.length()).any { caps.optString(it) == "battery" }, message = "Подставка на связи · $address · ${status.optString("firmware")}")
+                        val announcement = address to hub.url
+                        if (binding.optString("hub") == hub.url && hub.paired && announced != announcement &&
+                            hub.attachStand(binding, address)) announced = announcement
                     }
                 } catch (e: Exception) {
                     // A timeout inside discovery is a failed attempt, not cancellation of the polling lifecycle.
                     currentCoroutineContext().ensureActive()
-                    ip = null
+                    val at = android.os.SystemClock.elapsedRealtime()
+                    val ack = observationAck
+                    // A failed metadata request cannot invalidate newer authenticated stream traffic.
+                    val streamAlive = ack != null && ack.first == ip && at - ack.second in 0L..trackingLivenessMs
+                    if (!streamAlive) ip = null
                     android.util.Log.w("StandConnection", "Status unavailable: ${e.javaClass.simpleName}; cause=${e.cause?.javaClass?.simpleName.orEmpty()}")
                     val message = when (e) {
                         is StandDiscoveryException -> "Не нахожу подставку в Wi-Fi · повторю поиск автоматически"
                         is javax.net.ssl.SSLException -> "Не удалось проверить защищённое соединение с подставкой · повторю автоматически"
                         else -> "Подставка не отвечает по Wi-Fi · повторю подключение автоматически"
                     }
-                    state.value = state.value.copy(online = false, checked = true, message = message)
+                    if (!streamAlive) state.value = state.value.copy(online = false, checked = true, message = message)
                 }
                 finally { mutex.unlock() }
                 delay(15_000)

@@ -201,6 +201,9 @@ private val DATE = DateTimeFormatter.ofPattern("EEEE, d MMMM", Locale.forLanguag
 @Composable
 private fun Clock(now: Long, compact: Boolean, weather: WeatherReading?, timerEndsAt: Long?, ringing: Boolean, onWeather: () -> Unit,
                   hub: HubConnectionUi, hubConfigured: Boolean, hubUrl: String, hubRefused: Boolean, stand: StandUi, onConnection: () -> Unit) {
+    // Stream ACKs can be newer than the last screen tick. Sample the same monotonic
+    // clock now, otherwise fresh traffic appears to have a negative age and flashes red.
+    val connectionNow = SystemClock.elapsedRealtime()
     val moment = Instant.now().atZone(ZoneId.systemDefault())
     val (dx, dy) = Reflexes.drift(now)
     val driftX by animateFloatAsState(dx.toFloat(), tween(4000), label = "clock dx")
@@ -215,12 +218,12 @@ private fun Clock(now: Long, compact: Boolean, weather: WeatherReading?, timerEn
             Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
                 ConnectionIndicator("Хаб", stand = false,
                     state = connectionIndicatorState(hubConfigured, hub.online && !hubRefused && hub.url == hubUrl,
-                        hub.checked && hub.url == hubUrl, hub.seenAt, now), onClick = onConnection)
+                        hub.checked && hub.url == hubUrl, hub.seenAt, connectionNow), onClick = onConnection)
             }
             Text(moment.format(TIME), color = Color.White.copy(alpha = 0.8f), fontSize = if (compact) 30.sp else 56.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Light)
             Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
                 ConnectionIndicator("Подставка", stand = true,
-                    state = connectionIndicatorState(stand.paired, stand.online, stand.checked, stand.seenAt, now), onClick = onConnection)
+                    state = connectionIndicatorState(stand.paired, stand.online, stand.checked, stand.seenAt, connectionNow), onClick = onConnection)
             }
         }
         if (!compact) Text(moment.format(DATE), color = Color.White.copy(alpha = 0.55f), fontSize = 20.sp, modifier = Modifier.padding(top = 6.dp))

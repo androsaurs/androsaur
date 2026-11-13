@@ -46,6 +46,8 @@ import kotlinx.coroutines.ensureActive
 import dev.hram.androsaur.medication.MedicationSchedule
 import dev.hram.androsaur.notifications.ImportantNotification
 import dev.hram.androsaur.notifications.MedicationNotifications
+import dev.hram.androsaur.stand.FaceTracking
+import dev.hram.androsaur.stand.TrackingBox
 import dev.hram.androsaur.weather.Greeting
 import dev.hram.androsaur.weather.WeatherChoice
 import dev.hram.androsaur.weather.WeatherReading
@@ -143,6 +145,8 @@ class Brain(context: Context) {
     }
     val hub = HubClient(context, prefs)
     val stand = StandConnection(context, hub)
+    private val faceTracking = FaceTracking()
+    private val trackingDiagnostics = TrackingDiagnostics(hub, stand)
     private val profiler = Profiler { hub.sendTrace(it) }.also { p -> p.onRun = { hub.traceRun = it } }
     val weatherSource = WeatherSource(context, prefs)
     /** The weather to show under the clock, or null when there is none (no place known, nothing fetched, or too old). */
@@ -239,6 +243,7 @@ class Brain(context: Context) {
     /** The polling loop; call it from a background coroutine and cancel it when the screen goes away. */
     suspend fun run() = coroutineScope {
         launch { stand.run() }
+        launch { trackingDiagnostics.run() }
         launch { followCharacter() }
         launch { followPersonalChoices() }
         launch { followMouth() }
@@ -321,7 +326,7 @@ class Brain(context: Context) {
             val report = cameraReport()
             val request = characterRequest.incrementAndGet()
             val target = hub.url
-            val result = hub.sync(report, done, stand.hubReport())
+            val result = hub.sync(report, done, stand.hubReport(), stand.batteryReport())
             val reply = result.getOrNull()
             if (reply == null) {
                 hubConnection = HubConnectionUi(url = target, checked = true)
@@ -1178,6 +1183,9 @@ class Brain(context: Context) {
             if (round % 20 == 0) autoTrack()
             pollEvents()
             if (tracking) { pollFace(); watchArrival() }
+            faceTracking.lost(SystemClock.elapsedRealtime(), force = !tracking)?.let {
+                face = null; trackingDiagnostics.observe(it)
+            }
             applyScene()
             if (identifyUntil != 0L) pollIdentity()
             round++
@@ -1322,9 +1330,15 @@ class Brain(context: Context) {
             if (again == null || again.first != 200) { note = "Слежение не вернулось: ${again?.second?.optString("error") ?: "нет ответа"}" }
             return
         }
-        val boxes = reply.optJSONObject("mediapipe")?.optJSONArray("lastBoxes")
-        val first = if (boxes != null && boxes.length() > 0) boxes.getJSONObject(0) else null
-        face = first?.let { (it.optDouble("x") + it.optDouble("w") / 2) to (it.optDouble("y") + it.optDouble("h") / 2) }
+        val detector = reply.optJSONObject("mediapipe") ?: return
+        val boxes = detector.optJSONArray("lastBoxes")
+        val candidates = if (boxes == null) emptyList() else List(boxes.length()) { i -> boxes.getJSONObject(i).let {
+            TrackingBox(it.optDouble("x"), it.optDouble("y"), it.optDouble("w"), it.optDouble("h"))
+        } }
+        val sample = faceTracking.ingest(detector.optString("frameId"), detector.optLong("sampledAtMs"),
+            candidates, SystemClock.elapsedRealtime()) ?: return
+        face = if (sample.visible) ((sample.x!! + 1) / 2) to ((1 - sample.y!!) / 2) else null
+        trackingDiagnostics.observe(sample)
         if (face != null) { lastActivityAt = SystemClock.elapsedRealtime(); lastFaceAt = lastActivityAt }
     }
 

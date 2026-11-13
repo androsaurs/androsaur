@@ -6,8 +6,8 @@ android {
         applicationId = "dev.hram.androsaur"
         minSdk = 26
         targetSdk = 35
-        versionCode = 35
-        versionName = "0.12.0-medication-bubble"
+        versionCode = 40
+        versionName = "0.14.1-hub-battery"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildFeatures { compose = true; buildConfig = true }
@@ -16,6 +16,7 @@ android {
 }
 dependencies {
     implementation(project(":shared"))
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("androidx.activity:activity-compose:1.10.0")
     implementation("androidx.compose.material3:material3:1.3.1")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")

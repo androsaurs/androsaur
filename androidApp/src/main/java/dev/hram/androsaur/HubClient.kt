@@ -36,6 +36,10 @@ class HubClient(context: Context, private val prefs: SharedPreferences) {
 
     fun detachStand(): Boolean = call("POST", "$url/api/device/stand/detach", JSONObject().put("device", deviceId))?.first == 200
 
+    fun postTracking(session: String, samples: JSONArray): Boolean = paired && !refused &&
+        call("POST", "$url/api/device/tracking", JSONObject().put("device", deviceId)
+            .put("session", session).put("samples", samples), readTimeoutMs = 2000, connectTimeoutMs = 1500)?.first == 200
+
     val url: String get() = prefs.getString(KEY_URL, "").orEmpty()
 
     private val token: String get() = prefs.getString(KEY_TOKEN, "").orEmpty()
@@ -146,12 +150,13 @@ class HubClient(context: Context, private val prefs: SharedPreferences) {
      * ([done]), and takes the settings, the commands and what to do about the people. [Result.failure] when the hub did not
      * answer; then nothing of [done] reached it.
      */
-    fun sync(people: People?, done: List<Done>, standLink: JSONObject? = null): Result<Reply> {
+    fun sync(people: People?, done: List<Done>, standLink: JSONObject? = null, battery: JSONObject? = null): Result<Reply> {
         val base = url.ifEmpty { return Result.success(Reply(null, emptyList())) }
         if (token.isEmpty()) return Result.failure(IllegalStateException("нужна привязка: код в админке хаба → «Подключить к хабу» в панели"))
         val applied = prefs.getInt(KEY_APPLIED, 0)
         val report = JSONObject().put("device", deviceId).put("applied", applied)
             .put("standLink", standLink ?: JSONObject.NULL)
+            .put("battery", battery ?: JSONObject.NULL)
             .put("done", JSONArray().apply { done.forEach { put(JSONObject().put("id", it.id).put("ok", it.error == null).put("error", it.error ?: JSONObject.NULL)) } })
         if (people != null) report.put("people", people.people).put("faceModel", people.faceModel)
         if (!registered && !register(base)) return failure(null)
