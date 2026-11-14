@@ -19,6 +19,7 @@ import javax.net.ssl.HttpsURLConnection
 import javax.net.ssl.SSLContext
 import javax.net.ssl.X509TrustManager
 import java.net.URL
+import java.io.File
 
 /** Secrets stay encrypted with a non-exportable Android Keystore AES key; no toString of credentials. */
 class StandStore(context: Context) {
@@ -51,9 +52,24 @@ class StandStore(context: Context) {
 
 class StandClient(private val store: StandStore) {
     /** Verifies pin during the TLS handshake, before sending an Authorization header. No redirects. */
-    fun call(ip: String, path: String, body: JSONObject? = null): JSONObject {
+    fun call(ip: String, path: String, body: JSONObject? = null, timeoutMs: Int = 3000): JSONObject {
+        require(path in setOf("/v1/status", "/v1/hub", "/v1/policy", "/v1/servos/center", "/v1/servos/stop"))
+        return request(ip, path, body = body, timeoutMs = timeoutMs)
+    }
+
+    fun uploadFirmware(ip: String, image: File, sha256: String): JSONObject {
+        require(image.length() in 288..4L * 1024 * 1024)
+        require(Regex("[0-9a-f]{64}").matches(sha256))
+        return request(ip, "/v1/ota", image = image, hash = sha256, timeoutMs = 15_000)
+    }
+
+    fun confirmFirmware(ip: String, elfSha256: String): JSONObject {
+        require(Regex("[0-9a-f]{64}").matches(elfSha256))
+        return request(ip, "/v1/ota/confirm", hash = elfSha256, timeoutMs = 15_000)
+    }
+
+    private fun request(ip: String, path: String, body: JSONObject? = null, image: File? = null, hash: String? = null, timeoutMs: Int = 3000): JSONObject {
         require(Regex("(?:[0-9]{1,3}\\.){3}[0-9]{1,3}").matches(ip))
-        require(path in setOf("/v1/status", "/v1/hub", "/v1/policy"))
         val binding = checkNotNull(store.read())
         val identity = StandStore.identity(binding)
         val trust = object : X509TrustManager {
@@ -73,13 +89,26 @@ class StandClient(private val store: StandStore) {
                 val cert = session.peerCertificates.firstOrNull() as? X509Certificate
                 cert != null && MessageDigest.isEqual(MessageDigest.getInstance("SHA-256").digest(cert.encoded), identity.fingerprint.chunked(2).map { it.toInt(16).toByte() }.toByteArray())
             }
-            conn.instanceFollowRedirects = false; conn.connectTimeout = 3000; conn.readTimeout = 3000
+            conn.instanceFollowRedirects = false; conn.connectTimeout = timeoutMs; conn.readTimeout = timeoutMs
+            if (image != null) conn.readTimeout = 180_000
             conn.setRequestProperty("Authorization", "Bearer ${binding.getString("key")}")
-            if (body != null) {
+            if (image != null) {
+                conn.requestMethod = "POST"; conn.doOutput = true
+                conn.setFixedLengthStreamingMode(image.length())
+                conn.setRequestProperty("Content-Type", "application/octet-stream")
+                conn.setRequestProperty("X-Stand-Id", identity.id)
+                conn.setRequestProperty("X-Image-SHA256", checkNotNull(hash))
+                conn.outputStream.use { output -> image.inputStream().use { it.copyTo(output, 4096) } }
+            } else if (path == "/v1/ota/confirm") {
+                conn.requestMethod = "POST"; conn.doOutput = true
+                conn.setFixedLengthStreamingMode(0)
+                conn.setRequestProperty("X-ELF-SHA256", checkNotNull(hash))
+                conn.outputStream.close()
+            } else if (body != null) {
                 conn.requestMethod = "POST"; conn.doOutput = true; conn.setRequestProperty("Content-Type", "application/json")
                 conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
             }
-            check(conn.responseCode == 200) { "stand response ${conn.responseCode}" }
+            if (conn.responseCode != 200) throw StandHttpException(conn.responseCode)
             val buffer = ByteArray(8193)
             val count = conn.inputStream.use { input ->
                 var count = 0
@@ -88,7 +117,7 @@ class StandClient(private val store: StandStore) {
             }
             check(count <= 8192)
             val reply = JSONObject(String(buffer, 0, count, Charsets.UTF_8))
-            if (path == "/v1/status" || path == "/v1/policy") {
+            if (path in setOf("/v1/status", "/v1/policy", "/v1/servos/center", "/v1/servos/stop")) {
                 check(reply.getString("id") == identity.id)
                 check(reply.getString("phoneId") == binding.getString("phoneId"))
             }
@@ -96,3 +125,5 @@ class StandClient(private val store: StandStore) {
         } finally { conn.disconnect() }
     }
 }
+
+class StandHttpException(val status: Int) : java.io.IOException("stand response $status")

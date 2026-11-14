@@ -1,5 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <application>
+        <service android:name=".StandOtaService" android:exported="true" android:permission="android.permission.DUMP" android:foregroundServiceType="dataSync" />
         <receiver android:name=".StandProbeReceiver" android:exported="true" android:permission="android.permission.DUMP">
             <intent-filter><action android:name="dev.hram.androsaur.DEBUG_STAND_PROBE" /></intent-filter>
         </receiver>
